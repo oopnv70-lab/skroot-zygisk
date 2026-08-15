@@ -21,6 +21,14 @@ jobs:
           unzip -q android-ndk-r26d-linux.zip
           echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26d" >> "$GITHUB_ENV"
 
+      - name: Restore static library from chunks
+        run: |
+          cd src/testModule/kernel_module_kit/lib
+          cat libkernel_module_kit_static.a.xz.part_aa libkernel_module_kit_static.a.xz.part_ab > libkernel_module_kit_static.a.xz
+          xz -d libkernel_module_kit_static.a.xz
+          md5sum libkernel_module_kit_static.a
+          ls -la libkernel_module_kit_static.a
+
       - name: ndk-build
         run: |
           cd src/testModule/module_zygisk_compat
