@@ -1,0 +1,42 @@
+name: build-skygisk-compat-module
+
+on:
+  push:
+    paths:
+      - 'src/testModule/module_zygisk_compat/**'
+      - 'src/testModule/kernel_module_kit/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install NDK r26d
+        run: |
+          wget -q https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+          unzip -q android-ndk-r26d-linux.zip
+          echo "ANDROID_NDK_HOME=$PWD/android-ndk-r26d" >> "$GITHUB_ENV"
+
+      - name: ndk-build
+        run: |
+          cd src/testModule/module_zygisk_compat
+          "$ANDROID_NDK_HOME/ndk-build" -j"$(nproc)"
+          ls -la libs/arm64-v8a/
+
+      - name: Package module ZIP
+        run: |
+          cd src/testModule/module_zygisk_compat
+          cp libs/arm64-v8a/libskzygisk_compat.so ./libskzygisk_compat.so
+          zip skzygiskcompat-v0.1.0.zip libskzygisk_compat.so
+          unzip -l skzygiskcompat-v0.1.0.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skzygiskcompat-v0.1.0
+          path: src/testModule/module_zygisk_compat/skzygiskcompat-v0.1.0.zip
+          if-no-files-found: error
