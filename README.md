@@ -48,5 +48,7 @@ skroot-zygisk/
 详见 `docs/device-probe.md`。
 
 ## 许可证
+本项目采用 **GNU General Public License v3.0（GPL-3.0）**，全文见 [LICENSE](LICENSE)。
 
-待定（若采用 GPL 源码，则本项目需 GPL-3.0）。
+原因：本项目收录并分发 GPL-3.0 代码（Magisk 的 `util_functions.sh`、KernelSU 的 WebUI 桥等），
+按 GPL 条款，衍生作品须以 GPL-3.0 发布。第三方代码来源与许可详见 [NOTICE](NOTICE)。

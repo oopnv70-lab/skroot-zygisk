@@ -1,0 +1,29 @@
+# 第三方开源代码声明
+
+本项目（skroot-zygisk）采用 GNU General Public License v3.0（GPL-3.0）发布，
+全文见同目录 LICENSE 文件。
+
+本项目收录/引用了以下开源项目的代码，特此声明来源与许可证：
+
+## 1. Magisk
+- 项目：https://github.com/topjohnwu/Magisk
+- 许可证：GPL-3.0
+- 引用内容：
+  - `src/testModule/module_zygisk_compat/webroot/util_functions.sh`（Magisk 官方 `scripts/util_functions.sh`，用于 Magisk 模块安装脚本的兼容执行环境）
+
+## 2. KernelSU
+- 项目：https://github.com/tiann/KernelSU
+- 许可证：GPL-3.0
+- 引用内容（用于实现 Magisk/KernelSU 模块 WebUI 的 `window.ksu` 兼容桥，计划）：
+  - `js/index.js`（JS 侧 exec/spawn/toast 等桥封装）
+  - `manager/app/src/main/java/me/weishu/kernelsu/ui/webui/WebViewInterface.kt`（原生侧桥实现）
+
+## 3. Zygisk Next
+- 项目：https://github.com/Dr-TSNG/ZygiskNext
+- 许可证：GPL-3.0
+- 说明：本项目目标之一是使 Zygisk Next 这类 Magisk 模块可在 SKRoot Pro 上运行；
+  测试中使用的模块样本（Zygisk-Next 1.4.5）为第三方产物，非本仓库源码。
+
+## 合规说明
+- 凡上述 GPL 代码的修改与再分发，均遵循 GPL-3.0 条款：衍生作品同样以 GPL-3.0 发布，并保留原始版权声明。
+- 本仓库自身新增代码亦以 GPL-3.0 发布，与所引用代码保持一致。
