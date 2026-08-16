@@ -1,6 +1,18 @@
 // ksu-bridge.js
 // 在 SKRoot 的浏览器环境里伪造 KernelSU 的 window.ksu 桥，
 // 把 ksu.exec(cmd, options, callback) 转发到后端 /ksuExec 接口（root shell 执行）。
+//
+// 来源（原仓库）：https://github.com/tiann/KernelSU
+//   本文件的 exec 契约与实现语义参考自以下两个官方便开源文件：
+//     - 前端：js/index.js（window.ksu.exec 封装 + execPromisified Promise 版）
+//     - 原生侧：manager/app/src/main/java/me/weishu/kernelsu/ui/webui/WebViewInterface.kt
+//       （@JavascriptInterface fun exec(cmd, options, callbackFunc)，本质是 root shell 执行）
+// 作者：tiann (weishu) 及 KernelSU 贡献者
+// 许可证：GNU GPL-3.0（原文见仓库根目录 LICENSE）
+// 本项目（skroot-zygisk）改写说明：KernelSU 的桥通过 WebView @JavascriptInterface
+//   注入原生；SKRoot 使用 civetweb 纯 HTTP 无原生桥，故将 exec 改为 fetch POST
+//   到后端 /ksuExec，其余契约（三参回调 + errno/stdout/stderr）保持一致。
+//
 // 对齐 KernelSU 官方 js/index.js 的 exec 契约：
 //   ksu.exec(command, JSON.stringify(options), callbackName)
 //   回调签名：window[callbackName](errno, stdout, stderr)

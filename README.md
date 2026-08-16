@@ -9,14 +9,16 @@
 - 所有改动前，先在**测试机 / 锁 BL 可救砖**的设备上验证。
 - 每次改动只做**一个可控的步骤**，验证通过再下一步。
 - 禁止在主力机 / 无救砖手段的设备上直接实机调试。
-- 本项目当前为**空壳阶段**，尚无任何可运行代码。
+- 当前已有可安装、可运行 Magisk 模块的代码，且 run service.sh 会触碰 zygote 路径，务必谨慎。
 
 ## 项目状态
 
-**阶段：0 — 空壳搭建 / 可行性验证**
+**阶段：1 — Magisk 模块安装/运行兼容层（已真机打通安装链路）**
 
-尚未有任何可编译、可运行的模块代码。当前只有仓库骨架与设备实测记录。
-
+已完成可编译、可运行的模块代码（`src/testModule/module_zygisk_compat/`），
+真机验证：上传→解压→落盘→权限→source 官方 util_functions.sh→customize.sh 完整跑通（退出码 0）。
+另有模块列表 / 卸载 / 运行 service.sh 的 WebUI，以及 `window.ksu.exec` 兼容桥（后端 /ksuExec + 前端 ksu-bridge.js）。
+运行层（zygote 注入）为后续阶段。详见 `docs/roadmap.md`。
 ## 目标
 
 1. 摸清 SKRoot Pro 的模块加载机制与 SDK 接口（基于实机，非假设）。
@@ -28,7 +30,7 @@
 ```
 skroot-zygisk/
 ├── README.md            # 本文件
-├── LICENSE              # 许可证（待定）
+├── LICENSE              # 许可证（GPL-3.0 已确定）
 ├── docs/
 │   ├── device-probe.md  # 设备实测记录（所有结论的依据）
 │   ├── architecture.md  # 架构设计与方案对比（待补）

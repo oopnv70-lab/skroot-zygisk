@@ -14,15 +14,16 @@
 ## 2. KernelSU
 - 项目：https://github.com/tiann/KernelSU
 - 许可证：GPL-3.0
-- 引用内容（用于实现 Magisk/KernelSU 模块 WebUI 的 `window.ksu` 兼容桥，计划）：
-  - `js/index.js`（JS 侧 exec/spawn/toast 等桥封装）
-  - `manager/app/src/main/java/me/weishu/kernelsu/ui/webui/WebViewInterface.kt`（原生侧桥实现）
-
+- 引用内容（已实现：用于在 SKRoot 环境里复刻 `window.ksu` 兼容桥）：
+  - `js/index.js`（JS 侧 exec / spawn / toast 等桥封装，exec 三参回调 + execPromisified Promise 版）
+  - `manager/app/src/main/java/me/weishu/kernelsu/ui/webui/WebViewInterface.kt`（原生侧 `@JavascriptInterface fun exec(cmd, options, callbackFunc)`，本质是 root shell 执行命令）
+  - 本项目对应文件：`src/testModule/module_zygisk_compat/webroot/ksu-bridge.js`（改写为 fetch POST 到后端 /ksuExec，契约保持一致）
 ## 3. Zygisk Next
 - 项目：https://github.com/Dr-TSNG/ZygiskNext
 - 许可证：GPL-3.0
 - 说明：本项目目标之一是使 Zygisk Next 这类 Magisk 模块可在 SKRoot Pro 上运行；
-  测试中使用的模块样本（Zygisk-Next 1.4.5）为第三方产物，非本仓库源码。
+  测试中使用的模块样本（Zygisk-Next 1.4.5-836-b13d58a-release）为第三方发布产物，
+  非本仓库源码，仅在真机测试时落盘到 /data/adb/modules/zygisksu/，未收录其源码进本仓库。
 
 ## 合规说明
 - 凡上述 GPL 代码的修改与再分发，均遵循 GPL-3.0 条款：衍生作品同样以 GPL-3.0 发布，并保留原始版权声明。

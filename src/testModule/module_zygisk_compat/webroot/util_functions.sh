@@ -1,5 +1,13 @@
 ############################################
 # Magisk General Utility Functions
+#
+# 来源（原仓库）：https://github.com/topjohnwu/Magisk
+#   文件路径：scripts/util_functions.sh
+# 作者：topjohnwu (John Wu) 及 Magisk 贡献者
+# 许可证：GNU GPL-3.0（原文见仓库根目录 LICENSE）
+# 本项目（skroot-zygisk）用法：作为 Magisk 模块 customize.sh 的
+#   通用函数库被 source，以便在 SKRoot 环境里复刻 Magisk 安装流程。
+#   本文件为原样收录（未修改），版权归原作者所有。
 ############################################
 
 #MAGISK_VERSION_STUB
