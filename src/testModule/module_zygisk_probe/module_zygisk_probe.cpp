@@ -55,13 +55,6 @@ int skroot_module_main(const char* root_key, const char* module_private_dir) {
                    " ver=" + std::string(m.desc.version));
     }
 
-    // 7. SKRoot 基础能力自测
-    for (uint32_t i = 0; i <= 5; ++i) {
-        std::string r;
-        KModErr ee = test_skroot_basics(root_key, static_cast<BasicItem>(i), r);
-        log_report("test_basics[" + std::to_string(i) + "] => " + to_string(ee) + " | out=[" + r + "]");
-    }
-
     printf("[SKZygiskProbe] === entry done ===\n");
     return 0;
 }
