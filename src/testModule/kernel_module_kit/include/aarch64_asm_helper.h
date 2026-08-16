@@ -5,6 +5,8 @@
 #include <sstream>
 #include <iomanip>
 #include <memory>
+#include <algorithm>
+#include <cctype>
 
 #define ASMJIT_STATIC
 #include "third_party/asmjit2/core.h"
@@ -596,7 +598,7 @@ std::string print_aarch64_asm(Assembler* a) {
 	if (!logger) return {};
 	auto* str_logger = static_cast<StringLogger*>(logger);
 	std::string text = str_logger->data();
-	transform(text.begin(), text.end(), text.begin(), ::toupper);
+	std::transform(text.begin(), text.end(), text.begin(), ::toupper);
 	return text;
 }
 
