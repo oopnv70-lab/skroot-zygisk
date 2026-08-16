@@ -227,6 +227,23 @@ public:
         printf("[SKZygiskCompat] GET path=%s query=%s\n", path.c_str(), query.c_str());
         return false; // 走 civetweb 默认静态文件服务，返回 webroot/index.html
     }
+    // 重写基类的两参 handlePost：基类把 body 上限写死 256KB，会导致大模块 zip 直接 413。
+    // 这里用更大的上限（64MB）读取，再转回四参版本交给子类业务逻辑。
+    bool handlePost(CivetServer* server, struct mg_connection* conn) override {
+        std::string path = kernel_module::webui::get_request_path(conn);
+        std::string query = kernel_module::webui::get_request_query_string(conn);
+        std::string body;
+        auto st = kernel_module::webui::read_request_body(conn, body, 64u * 1024u * 1024u);
+        if (st == kernel_module::webui::BodyReadStatus::TOO_LARGE) {
+            printf("[SKZygiskCompat] POST 超过 64MB 上限，拒绝\n");
+            return kernel_module::webui::send_text(conn, 413, "payload too large (>64MB)"), true;
+        }
+        if (st != kernel_module::webui::BodyReadStatus::OK) {
+            printf("[SKZygiskCompat] POST body 读取失败 st=%d\n", (int)st);
+            return kernel_module::webui::send_text(conn, 400, "bad request body"), true;
+        }
+        return handlePost(server, conn, path, body);
+    }
 
     // 把原始请求体（纯文件字节）写盘到 uploads/
     static bool write_upload(const std::string& dir, const std::string& filename, const std::string& body, std::string& err) {
