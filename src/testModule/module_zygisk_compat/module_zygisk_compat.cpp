@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 #include <ctime>
+#include <cerrno>
 #include <sys/stat.h>
 #include "kernel_module_kit_umbrella.h"
 
@@ -227,47 +228,63 @@ public:
         return false; // 走 civetweb 默认静态文件服务，返回 webroot/index.html
     }
 
-    // 文件上传字段回调：把上传文件流式写盘
-    static int field_found_cb(const char* key, const char* filename, char* path, size_t pathlen, void* user_data) {
-        (void)user_data;
-        if (filename && filename[0]) {
-            std::string dir = g_private_dir + "/uploads";
-            mkdir(dir.c_str(), 0755);
-            std::string dst = dir + "/" + filename;
-            g_last_upload_orig = filename;
-            g_last_upload_name = dst;
-            if (dst.size() + 1 <= pathlen) {
-                snprintf(path, pathlen, "%s", dst.c_str());
-                return MG_FORM_FIELD_STORAGE_STORE;
-            }
+    // 把原始请求体（纯文件字节）写盘到 uploads/
+    static bool write_upload(const std::string& dir, const std::string& filename, const std::string& body, std::string& err) {
+        if (body.empty()) { err = "body 为空"; return false; }
+        err.clear();
+        if (mkdir(dir.c_str(), 0755) != 0 && errno != EEXIST) {
+            err = "mkdir 失败 errno=" + std::to_string(errno);
+            return false;
         }
-        return MG_FORM_FIELD_STORAGE_SKIP;
+        std::string dst = dir + "/" + filename;
+        FILE* fp = fopen(dst.c_str(), "wb");
+        if (!fp) { err = "fopen 失败 errno=" + std::to_string(errno) + " path=" + dst; return false; }
+        size_t w = fwrite(body.data(), 1, body.size(), fp);
+        int fe = ferror(fp);
+        fclose(fp);
+        if (w != body.size() || fe) {
+            err = "fwrite 不完整 写入=" + std::to_string(w) + " 期望=" + std::to_string(body.size());
+            return false;
+        }
+        g_last_upload_name = dst;
+        g_last_upload_orig = filename;
+        return true;
     }
-
     bool handlePost(CivetServer* server, struct mg_connection* conn, const std::string& path, const std::string& body) override {
         printf("[SKZygiskCompat] POST path=%s body_len=%zu\n", path.c_str(), body.size());
-
-        // ---- 上传：把 zip 落盘到 uploads/ ----
+        // ---- 上传：把原始 body（zip 字节）落盘到 uploads/ ----
         if (path == "/upload") {
             g_last_upload_name.clear();
             g_last_upload_orig.clear();
-            struct mg_form_data_handler fdh;
-            memset(&fdh, 0, sizeof(fdh));
-            fdh.field_found = field_found_cb;
-            fdh.field_get = nullptr;
-            fdh.field_store = nullptr;
-            fdh.user_data = nullptr;
-
-            int n = mg_handle_form_request(conn, &fdh);
-            printf("[SKZygiskCompat] upload handled=%d name=%s -> %s\n", n, g_last_upload_orig.c_str(), g_last_upload_name.c_str());
-
-            std::string resp = "{\"ok\":true,\"fields\":" + std::to_string(n) +
-                               ",\"name\":\"" + g_last_upload_orig + "\",\"path\":\"" + g_last_upload_name + "\"}";
-            kernel_module::webui::send_json(conn, 200, resp);
+            // 文件名从 query 参数 ?name=xxx.zip 取；缺省用时间戳
+            std::string q = kernel_module::webui::get_request_query_string(conn);
+            std::string filename;
+            const std::string key = "name=";
+            size_t p = q.find(key);
+            if (p != std::string::npos) {
+                filename = q.substr(p + key.size());
+                size_t amp = filename.find('&');
+                if (amp != std::string::npos) filename = filename.substr(0, amp);
+            }
+            if (filename.empty()) {
+                char ts[32];
+                snprintf(ts, sizeof(ts), "upload_%lld.zip", (long long)time(nullptr));
+                filename = ts;
+            }
+            std::string err;
+            bool ok = write_upload(g_private_dir + "/uploads", filename, body, err);
+            printf("[SKZygiskCompat] upload ok=%d name=%s path=%s err=%s body_len=%zu\n",
+                   ok ? 1 : 0, filename.c_str(), g_last_upload_name.c_str(), err.c_str(), body.size());
+            std::string resp;
+            if (ok) {
+                resp = "{\"ok\":true,\"name\":\"" + filename + "\",\"path\":\"" + g_last_upload_name + "\",\"size\":" + std::to_string(body.size()) + "}";
+            } else {
+                resp = "{\"ok\":false,\"error\":\"" + err + "\"}";
+            }
+            kernel_module::webui::send_json(conn, ok ? 200 : 500, resp);
             return true;
         }
-
-        // ---- 安装：把已上传的 zip 按 Magisk 契约装进 /data/adb/modules/<id>/ ----
+// ---- 安装：把已上传的 zip 按 Magisk 契约装进 /data/adb/modules/<id>/ ----
         if (path == "/install") {
             if (g_last_upload_name.empty()) {
                 kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"请先上传 zip\"}");

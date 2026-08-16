@@ -17,15 +17,25 @@
       const input = document.getElementById('file');
       if (!input.files.length) { alert('请先选择一个模块 ZIP'); return; }
       const file = input.files[0];
-      const fd = new FormData();
-      fd.append('module', file, file.name);
 
       const box = document.getElementById('result');
-      box.textContent = "上传中：" + file.name + " ...";
+      box.textContent = "上传中：" + file.name + " (" + file.size + " 字节) ...";
       try {
-        const resp = await fetch('/upload', { method: 'POST', body: fd });
-        const data = await resp.json();
-        box.textContent = "已上传 → " + data.name + "\n落盘路径：" + data.path;
+        const resp = await fetch('/upload?name=' + encodeURIComponent(file.name),
+                                 { method: 'POST', body: file });
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (je) {
+          box.textContent = "上传失败：响应不是 JSON。HTTP=" + resp.status +
+            "\n原始响应：\n" + text;
+          return;
+        }
+        if (data.ok) {
+          box.textContent = "已上传 → " + data.name + "\n落盘路径：" + data.path + "\n大小：" + data.size + " 字节";
+        } else {
+          box.textContent = "上传失败：" + (data.error || "未知错误");
+        }
       } catch (e) {
         box.textContent = "上传失败：" + e;
       }
@@ -36,7 +46,14 @@
       box.textContent = "安装中，请稍候...";
       try {
         const resp = await fetch('/install', { method: 'POST', body: '' });
-        const data = await resp.json();
+        const text = await resp.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (je) {
+          box.textContent = "安装失败：响应不是 JSON。HTTP=" + resp.status +
+            "\n原始响应：\n" + text;
+          return;
+        }
         if (data.ok) {
           box.textContent = "安装完成：\n\n" + data.report;
         } else {
