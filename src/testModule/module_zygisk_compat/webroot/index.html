@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>SKZygiskCompat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>
+    async function getStatus() {
+      try {
+        const resp = await fetch('/getStatus', { method: 'POST', body: '' });
+        const data = await resp.json();
+        document.getElementById('status').textContent =
+          "入口已调用 | PID=" + data.pid + " | UID=" + data.uid;
+      } catch (e) {
+        document.getElementById('status').textContent = "请求失败：" + e;
+      }
+    }
+    document.addEventListener('DOMContentLoaded', getStatus);
+  </script>
+</head>
+<body>
+  <h1>SKZygiskCompat</h1>
+  <p>Magisk/Zygisk 兼容层（基础验证版）</p>
+  <div id="status" style="font-size:1.2em; margin-top:1em;">加载中...</div>
+</body>
+</html>
