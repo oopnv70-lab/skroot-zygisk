@@ -333,12 +333,15 @@ static bool do_install_magisk_module(const std::string& zip_path, std::string& r
             }
         }
         // 在同一个 shell 里：source util_functions.sh → 设身份变量 → 探测架构 → source customize.sh
-        // 身份：伪装成 Magisk，MAGISK_VER_CODE 满足 Zygisk-Next 的 MIN_MAGISK_VERSION=26402
+        // 身份：伪装成 Magisk。MAGISK_VER_CODE 需同时满足：
+        //   - Zygisk-Next 的 MIN_MAGISK_VERSION=26402（Magisk 26.4）
+        //   - LSPosed 的 check_magisk_version 阈值 26403（其提示文案误写为 v27+）
+        // 取 28101（Magisk v28.1）以覆盖更高要求的新模块，避免被各家版本门槛卡住。
         KModErr e = rsh("if [ -f " + sq(modroot) + "/customize.sh ]; then "
                         "  echo '--- customize.sh 开始（官方 util_functions.sh）---'; "
                         "  sh -c '. " + sq(util) + "; "
                         "OUTFD=1; BOOTMODE=true; TMPDIR=/dev/tmp; MAGISKBIN=/data/adb/magisk; "
-                        "MAGISK_VER_CODE=26402; "
+                        "MAGISK_VER_CODE=28101; "
                         "ZIPFILE=" + sq(zip_path) + "; MODPATH=" + sq(modroot) + "; MODID=" + sq(modid) + "; "
                         "api_level_arch_detect; "
                         ". " + sq(modroot) + "/customize.sh' 2>&1; echo '--- customize.sh 退出码='$?; "
