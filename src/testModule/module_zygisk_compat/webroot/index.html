@@ -25,27 +25,49 @@
       try {
         const resp = await fetch('/upload', { method: 'POST', body: fd });
         const data = await resp.json();
-        box.textContent = "已接收：" + data.name + "（字段数 " + data.fields + "）";
+        box.textContent = "已上传 → " + data.name + "\n落盘路径：" + data.path;
       } catch (e) {
         box.textContent = "上传失败：" + e;
+      }
+    }
+
+    async function installModule() {
+      const box = document.getElementById('result');
+      box.textContent = "安装中，请稍候...";
+      try {
+        const resp = await fetch('/install', { method: 'POST', body: '' });
+        const data = await resp.json();
+        if (data.ok) {
+          box.textContent = "安装完成：\n\n" + data.report;
+        } else {
+          box.textContent = "安装失败：\n" + data.report;
+        }
+      } catch (e) {
+        box.textContent = "安装请求失败：" + e;
       }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
       getStatus();
       document.getElementById('uploadBtn').addEventListener('click', uploadModule);
+      document.getElementById('installBtn').addEventListener('click', installModule);
     });
   </script>
 </head>
 <body>
   <h1>SKZygiskCompat</h1>
-  <p>Magisk/Zygisk 兼容层</p>
+  <p>Magisk 兼容层：上传一个 Magisk 模块 zip → 装进容器 → 运行其脚本</p>
 
   <div id="status" style="font-size:1.1em; margin-bottom:1em;">加载中...</div>
 
-  <h2>选择模块</h2>
+  <h2>1. 选择模块</h2>
   <input type="file" id="file" accept=".zip" />
-  <button id="uploadBtn">上传安装</button>
-  <div id="result" style="margin-top:1em; color:#333;"></div>
+  <button id="uploadBtn">上传</button>
+
+  <h2>2. 安装并运行</h2>
+  <button id="installBtn">安装到 /data/adb/modules 并运行</button>
+
+  <h3>结果</h3>
+  <pre id="result" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0f0; padding:1em; min-height:300px;">（待操作）</pre>
 </body>
 </html>
