@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,3 +56,30 @@ jobs:
           files: src/testModule/module_zygisk_compat/skzygiskcompat.zip
           prerelease: true
           generate_release_notes: false
+          body: |
+            # SKZygiskCompat v0.1.0-beta.1（第一个测试版）
+
+            ## ⚠️ 暂时无法使用声明
+
+            **本版本仅用于测试模块管理链路，Zygisk 注入功能目前不可用。**
+
+            根本原因：SKRoot Pro 的 root 是 `u:r:shell:s0` 域的容器 root，无法 ptrace 到宿主机的 `u:r:zygote:s0` 域 zygote 进程，因此 Zygisk/Zygisk-Next 的 hook 注入在本容器内无法生效。注入能力需真机 Magisk / KernelSU / APatch。
+
+            ## 目前已修复的 Bug
+
+            1. 通用模块 WebUI 代理（`c0fda0a`）：新增 `/module/<id>/<路径>` 路由，让模块自带的 WebUI 能在浏览器打开。
+            2. WebUI 空白修复（`d7ff3ca`）：模块的 `index.html` 使用根绝对路径引用资源时，自动补上 `/module/<id>` 前缀，解决 JS/CSS 404 导致的空白页。
+            3. 模块无法卸载修复（`89b8a8b`）：修复 URL 编码 id 未 decode、以及卸载/运行校验白名单过严两个问题。
+            4. ksuExec 异常处理（`9a2fdd2`）：`ksu` 命令桥执行增加 try/catch，避免异常导致后端崩溃。
+            5. aarch64 汇编头文件编译错误（`ee89484`）：修复 `aarch64_asm_helper.h` 缺失 `<algorithm>` 导致的编译失败。
+            6. ksu 命令桥（`ffc52ba`）：实现 `ksu` 命令桥，打通模块管理命令链路。
+
+            ## 当前已实现的能力
+
+            - Magisk 模块安装 / 列表 / 卸载
+            - 模块 WebUI 通用代理（可在浏览器环境打开并操作）
+            - `ksu` 命令桥
+
+            ## 说明
+
+            本工程定位为「SKRoot 容器内的 Magisk 模块管理兼容层」。hook 注入受容器架构限制暂不支持。
