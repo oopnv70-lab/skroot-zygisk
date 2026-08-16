@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>SKZygiskProbe</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script>
+    async function getLog() {
+      const box = document.getElementById('log');
+      box.textContent = "读取日志中...";
+      try {
+        const resp = await fetch('/getLog', { method: 'POST', body: '' });
+        const txt = await resp.text();
+        box.textContent = txt;
+      } catch (e) {
+        box.textContent = "读取失败：" + e;
+      }
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btn').addEventListener('click', getLog);
+      getLog();
+    });
+  </script>
+</head>
+<body>
+  <h1>SKZygiskProbe</h1>
+  <p>探针：验证 SKRoot 环境 root/命令/模块列表是否真实可用</p>
+  <button id="btn">刷新日志</button>
+  <pre id="log" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0f0; padding:1em; min-height:300px;">加载中...</pre>
+</body>
+</html>

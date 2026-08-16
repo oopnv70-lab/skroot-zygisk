@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'src/testModule/module_zygisk_compat/**'
+      - 'src/testModule/module_zygisk_probe/**'
       - 'src/testModule/kernel_module_kit/**'
       - '.github/workflows/build.yml'
   workflow_dispatch:
@@ -29,20 +30,40 @@ jobs:
           md5sum libkernel_module_kit_static.a
           ls -la libkernel_module_kit_static.a
 
-      - name: ndk-build
+      - name: ndk-build probe
+        run: |
+          cd src/testModule/module_zygisk_probe
+          "$ANDROID_NDK_HOME/ndk-build" -j"$(nproc)"
+          ls -la libs/arm64-v8a/
+
+      - name: Package probe module ZIP
+        run: |
+          cd src/testModule/module_zygisk_probe
+          cp libs/arm64-v8a/libskzygisk_probe.so ./libskzygisk_probe.so
+          zip -r skzygiskprobe-v0.1.0.zip libskzygisk_probe.so webroot
+          unzip -l skzygiskprobe-v0.1.0.zip
+
+      - name: Upload probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skzygiskprobe-v0.1.0
+          path: src/testModule/module_zygisk_probe/skzygiskprobe-v0.1.0.zip
+          if-no-files-found: error
+
+      - name: ndk-build compat
         run: |
           cd src/testModule/module_zygisk_compat
           "$ANDROID_NDK_HOME/ndk-build" -j"$(nproc)"
           ls -la libs/arm64-v8a/
 
-      - name: Package module ZIP
+      - name: Package compat module ZIP
         run: |
           cd src/testModule/module_zygisk_compat
           cp libs/arm64-v8a/libskzygisk_compat.so ./libskzygisk_compat.so
           zip -r skzygiskcompat-v0.3.0.zip libskzygisk_compat.so webroot
           unzip -l skzygiskcompat-v0.3.0.zip
 
-      - name: Upload artifact
+      - name: Upload compat artifact
         uses: actions/upload-artifact@v4
         with:
           name: skzygiskcompat-v0.3.0
