@@ -6,7 +6,8 @@
 #include "kernel_module_kit_umbrella.h"
 
 using namespace skroot_env;
-using kernel_module::to_string;
+
+// to_string(KModErr) 是 module_err_def.h 里的全局函数，直接使用，无需 using。
 
 // 全局保存，供 WebUI 使用
 static std::string g_root_key;
@@ -114,5 +115,5 @@ SKROOT_MODULE_NAME("SKZygiskProbe")
 SKROOT_MODULE_VERSION("0.1.0")
 SKROOT_MODULE_DESC("probe: verify root/cmd/module-list on SKRoot Pro")
 SKROOT_MODULE_AUTHOR("oopnv70-lab")
-SKROOT_MODULE_ID32("Pr0b3Zyg1skR00tEnv0000000000001x")
+SKROOT_MODULE_ID32("c3a2f8b1e5d044679abcdef0123456789")
 SKROOT_MODULE_WEB_UI(ZygiskProbeWebHandler)
