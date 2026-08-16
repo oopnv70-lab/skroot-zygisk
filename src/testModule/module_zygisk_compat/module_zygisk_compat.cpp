@@ -143,6 +143,49 @@ static bool safe_module_id(const std::string& id) {
     }
     return true;
 }
+// 把 HTML 里的"根绝对路径"重写为模块子路径前缀 /module/<id>：
+//   模块的 webroot 常用 /assets/xxx、/internal/xxx 这类根绝对路径引用自身资源
+//   （KernelSU/APatch 的原生 WebUI 里模块界面挂在根路径，所以模块作者这么写）。
+//   我们代理到 /module/<id>/ 子路径，必须把 src="..." 与 href="..." 中
+//   以 '/' 开头、且非 '//'（协议相对）、非 http(s) 的引用前缀补上 /module/<id>。
+static std::string rewrite_root_paths(const std::string& html, const std::string& id) {
+    std::string out;
+    out.reserve(html.size() + 64);
+    const std::string prefix = "/module/" + id;
+    size_t i = 0;
+    const size_t n = html.size();
+    // 依次扫描所有 "src=" 或 "href=" 后的 '/'，判断是否根路径
+    const char* attrs[] = {"src=", "href=", "SRC=", "HREF="};
+    while (i < n) {
+        // 找下一个 attr（可能带引号）
+        size_t best = std::string::npos;
+        int bestlen = 0;
+        for (const char* a : attrs) {
+            size_t p = html.find(a, i);
+            if (p != std::string::npos && (best == std::string::npos || p < best)) { best = p; bestlen = (int)strlen(a); }
+        }
+        if (best == std::string::npos) { out += html.substr(i); break; }
+        // 拷贝 [i, best+attrlen) 原样
+        out += html.substr(i, best - i);
+        // attr 名
+        out += html.substr(best, bestlen);
+        size_t j = best + bestlen;
+        // 跳过 attr 名后可能的空白与引号（引号也要原样输出）
+        if (j < n && (html[j] == '"' || html[j] == '\'')) { out += html[j]; j++; }
+        else {
+            // 无引号：跳过空白
+            while (j < n && (html[j] == ' ' || html[j] == '\t')) j++;
+        }
+        // 现在 j 指向属性值起始。判断是否为根绝对路径：'/xxx' 且第二个字符不是 '/'
+        if (j < n && html[j] == '/' && (j + 1 >= n || html[j + 1] != '/')) {
+            // 根绝对路径：插入前缀
+            out += prefix;
+        }
+        // 继续扫描（不消费引号，从 j 继续，让下一轮正常处理剩余）
+        i = j;
+    }
+    return out;
+}
 
 // ============ 安装一个 Magisk 模块 zip（复刻 Magisk install_module 的 6 步） ============
 // 输入：zip_path = 已上传落盘的模块 zip 绝对路径
@@ -360,6 +403,9 @@ public:
             const char* ctype = mime_of(sub);
             if (sub.size() >= 5 && (sub.compare(sub.size() - 5, 5, ".html") == 0 ||
                                     sub.compare(sub.size() - 4, 4, ".htm") == 0)) {
+                // 先重写模块自身资源的根绝对路径（/assets、/internal 等）→ /module/<id>/assets 等
+                out = rewrite_root_paths(out, id);
+                // 再注入 ksu 兼容桥（根路径 /ksu-bridge.js，所有模块界面共享，不随模块子路径变化）
                 const std::string script = "<script src=\"/ksu-bridge.js\"></script>";
                 // 优先插到 <head> 之后（紧随其后，保证最先加载）；找不到则在文档开头注入
                 size_t hp = out.find("<head>");
