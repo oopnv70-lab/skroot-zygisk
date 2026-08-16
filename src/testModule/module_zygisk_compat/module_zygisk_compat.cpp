@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cctype>
+#include <cstdlib>
 #include <string>
 #include <ctime>
 #include <cerrno>
@@ -548,8 +549,19 @@ public:
                 return r;
             };
             int errno_i = 0;
-            if (is_ok(ec)) { try { errno_i = std::stoi(code_s); } catch (...) { errno_i = -1; } }
-            else errno_i = -1;
+            if (is_ok(ec)) {
+                // 用 strtol 解析退出码（不抛异常，适配 NDK -fno-exceptions 环境）
+                errno = 0;
+                char* endp = nullptr;
+                long v = strtol(code_s.c_str(), &endp, 10);
+                if (errno == 0 && endp && endp != code_s.c_str() && *endp == '\0') {
+                    errno_i = (int)v;
+                } else {
+                    errno_i = -1;
+                }
+            } else {
+                errno_i = -1;
+            }
             std::string resp = "{\"errno\":" + std::to_string(errno_i) +
                                ",\"stdout\":\"" + jesc(out_s) +
                                "\",\"stderr\":\"" + jesc(err_s) + "\"}";
