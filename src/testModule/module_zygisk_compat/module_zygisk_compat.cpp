@@ -57,6 +57,16 @@ static std::string sq(const std::string& s) {
     r += "'";
     return r;
 }
+// 去掉字符串末尾的 '/'(只留根路径"/"本身的斜杠)，用于拼接子路径避免出现 "//"
+static std::string trim_trailing_slash(const std::string& s) {
+    std::string r = s;
+    while (r.size() > 1 && r.back() == '/') r.pop_back();
+    return r;
+}
+// 拼接路径：左侧去掉尾斜杠后加 '/' + 右侧
+static std::string join_path(const std::string& base, const std::string& sub) {
+    return trim_trailing_slash(base) + "/" + sub;
+}
 
 // ============ 安装一个 Magisk 模块 zip（复刻 Magisk install_module 的 6 步） ============
 // 输入：zip_path = 已上传落盘的模块 zip 绝对路径
@@ -73,12 +83,12 @@ static bool do_install_magisk_module(const std::string& zip_path, std::string& r
         add("[0] zip 存在性检查");
         if (!is_ok(e)) {
             add("  ✗ rsh 调用失败 err=" + to_string(e));
-            append_diag("ls -la " + sq(zip_path) + " 2>&1; echo '--- 上级目录 ---'; ls -la " + sq(g_private_dir) + "/uploads 2>&1", report);
+            append_diag("ls -la " + sq(zip_path) + " 2>&1; echo '--- 上级目录 ---'; ls -la " + sq(join_path(g_private_dir, "uploads")) + " 2>&1", report);
             return false;
         }
         if (out.find("MISSING") != std::string::npos) {
             add("  ✗ 上传的 zip 不存在: " + zip_path);
-            append_diag("ls -la " + sq(g_private_dir) + "/uploads 2>&1", report);
+            append_diag("ls -la " + sq(join_path(g_private_dir, "uploads")) + " 2>&1", report);
             return false;
         }
         add("  ✓ zip 存在: " + zip_path);
@@ -89,7 +99,7 @@ static bool do_install_magisk_module(const std::string& zip_path, std::string& r
     {
         // 预检 unzip 是否存在，失败时能看到具体原因
         add("[1] 读取 module.prop id");
-        append_diag("which unzip 2>&1 || echo 'unzip 不存在'; unzip -v 2>&1 | head -1", report);
+        append_diag("which unzip 2>&1 || echo 'unzip 不存在'", report);
         KModErr e = rsh("unzip -p " + sq(zip_path) + " module.prop 2>&1 | sed -n 's/^id=//p' | tr -d '\\r\\n'", out);
         if (!is_ok(e)) {
             add("  ✗ 读 module.prop 失败 err=" + to_string(e) + " out=" + out);
@@ -128,7 +138,7 @@ static bool do_install_magisk_module(const std::string& zip_path, std::string& r
         KModErr e = rsh("cd / && unzip -o " + sq(zip_path) + " -x 'META-INF/*' -d " + sq(modroot) + " 2>&1", out);
         if (!is_ok(e) || out.find("cannot find") != std::string::npos || out.find("error") != std::string::npos) {
             add("  ✗ 解压失败 err=" + to_string(e) + " out=" + out);
-            append_diag("which unzip 2>&1; unzip -v 2>&1 | head -2; echo '--- zip 完整性 ---'; unzip -t " + sq(zip_path) + " 2>&1 | tail -5", report);
+            append_diag("which unzip 2>&1; echo '--- zip 完整性 ---'; unzip -t " + sq(zip_path) + " 2>&1 | tail -5", report);
             return false;
         }
         add("  ✓ 解压完成");
@@ -289,7 +299,7 @@ public:
                 filename = ts;
             }
             std::string err;
-            bool ok = write_upload(g_private_dir + "/uploads", filename, body, err);
+            bool ok = write_upload(join_path(g_private_dir, "uploads"), filename, body, err);
             printf("[SKZygiskCompat] upload ok=%d name=%s path=%s err=%s body_len=%zu\n",
                    ok ? 1 : 0, filename.c_str(), g_last_upload_name.c_str(), err.c_str(), body.size());
             std::string resp;
