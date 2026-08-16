@@ -39,12 +39,12 @@ jobs:
         run: |
           cd src/testModule/module_zygisk_compat
           cp libs/arm64-v8a/libskzygisk_compat.so ./libskzygisk_compat.so
-          zip -r skzygiskcompat-v0.2.0.zip libskzygisk_compat.so webroot
-          unzip -l skzygiskcompat-v0.2.0.zip
+          zip -r skzygiskcompat-v0.3.0.zip libskzygisk_compat.so webroot
+          unzip -l skzygiskcompat-v0.3.0.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: skzygiskcompat-v0.2.0
-          path: src/testModule/module_zygisk_compat/skzygiskcompat-v0.2.0.zip
+          name: skzygiskcompat-v0.3.0
+          path: src/testModule/module_zygisk_compat/skzygiskcompat-v0.3.0.zip
           if-no-files-found: error

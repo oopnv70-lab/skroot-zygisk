@@ -5,22 +5,47 @@
   <title>SKZygiskCompat</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <script>
-    async function getStatus() {
+    function getStatus() {
+      fetch('/getStatus', { method: 'POST', body: '' })
+        .then(r => r.json())
+        .then(d => { document.getElementById('status').textContent =
+          "入口已调用 | PID=" + d.pid + " | UID=" + d.uid; })
+        .catch(e => { document.getElementById('status').textContent = "请求失败：" + e; });
+    }
+
+    async function uploadModule() {
+      const input = document.getElementById('file');
+      if (!input.files.length) { alert('请先选择一个模块 ZIP'); return; }
+      const file = input.files[0];
+      const fd = new FormData();
+      fd.append('module', file, file.name);
+
+      const box = document.getElementById('result');
+      box.textContent = "上传中：" + file.name + " ...";
       try {
-        const resp = await fetch('/getStatus', { method: 'POST', body: '' });
+        const resp = await fetch('/upload', { method: 'POST', body: fd });
         const data = await resp.json();
-        document.getElementById('status').textContent =
-          "入口已调用 | PID=" + data.pid + " | UID=" + data.uid;
+        box.textContent = "已接收：" + data.name + "（字段数 " + data.fields + "）";
       } catch (e) {
-        document.getElementById('status').textContent = "请求失败：" + e;
+        box.textContent = "上传失败：" + e;
       }
     }
-    document.addEventListener('DOMContentLoaded', getStatus);
+
+    document.addEventListener('DOMContentLoaded', () => {
+      getStatus();
+      document.getElementById('uploadBtn').addEventListener('click', uploadModule);
+    });
   </script>
 </head>
 <body>
   <h1>SKZygiskCompat</h1>
-  <p>Magisk/Zygisk 兼容层（基础验证版）</p>
-  <div id="status" style="font-size:1.2em; margin-top:1em;">加载中...</div>
+  <p>Magisk/Zygisk 兼容层</p>
+
+  <div id="status" style="font-size:1.1em; margin-bottom:1em;">加载中...</div>
+
+  <h2>选择模块</h2>
+  <input type="file" id="file" accept=".zip" />
+  <button id="uploadBtn">上传安装</button>
+  <div id="result" style="margin-top:1em; color:#333;"></div>
 </body>
 </html>
