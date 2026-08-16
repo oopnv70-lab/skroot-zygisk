@@ -39,7 +39,7 @@ jobs:
         run: |
           cd src/testModule/module_mincompat
           cp libs/arm64-v8a/libmincompat.so ./libmincompat.so
-          zip -r mincompat.zip libmincompat.so
+          zip -r mincompat.zip libmincompat.so webroot
           unzip -l mincompat.zip
 
       - name: Upload mincompat artifact
