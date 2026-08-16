@@ -496,6 +496,67 @@ public:
             return true;
         }
 
+        // ---- ksu.exec 兼容桥：对齐 KernelSU window.ksu.exec(cmd, options, callback) ----
+        // 前端会把命令 POST 到这里（JSON），我们执行并把 stdout/stderr/exit code 分开返回。
+        if (path == "/ksuExec") {
+            // body 是原始命令字符串（或 JSON {"cmd":"..."}），这里统一按"原样当 shell 命令"处理
+            std::string cmd = body;
+            // 若 body 是 JSON 包装，剥一层（前端可能传 {"cmd": "..."}）
+            {
+                std::string t = body;
+                // 去掉首尾空白
+                while (!t.empty() && (t.front() == ' ' || t.front() == '\n' || t.front() == '\r' || t.front() == '\t')) t.erase(t.begin());
+                while (!t.empty() && (t.back() == ' ' || t.back() == '\n' || t.back() == '\r' || t.back() == '\t')) t.pop_back();
+                if (t.size() >= 2 && t.front() == '{' && t.back() == '}') {
+                    const std::string ck = "\"cmd\":\"";
+                    size_t ckpos = t.find(ck);
+                    if (ckpos != std::string::npos) {
+                        size_t vstart = ckpos + ck.size();
+                        size_t vend = t.find('"', vstart);
+                        if (vend != std::string::npos) {
+                            cmd = t.substr(vstart, vend - vstart);
+                        }
+                    }
+                }
+            }
+            if (cmd.empty()) {
+                kernel_module::webui::send_json(conn, 400, "{\"errno\":-1,\"stdout\":\"\",\"stderr\":\"empty command\"}");
+                return true;
+            }
+            // 用临时文件分离 stdout / stderr / exit code
+            std::string tmpdir = "/data/local/tmp/skzygisk_exec";
+            std::string run_out;
+            KModErr e = rsh("mkdir -p " + sq(tmpdir) + " 2>/dev/null; "
+                            "sh -c " + sq(cmd) + " > " + sq(tmpdir) + "/out 2> " + sq(tmpdir) + "/err; "
+                            "echo $? > " + sq(tmpdir) + "/code", run_out);
+            // 分别读回 code / out / err
+            std::string code_s, out_s, err_s;
+            KModErr ec = rsh("cat " + sq(tmpdir) + "/code 2>/dev/null | tr -d '\\n\\r'", code_s);
+            KModErr eo = rsh("cat " + sq(tmpdir) + "/out 2>/dev/null", out_s);
+            KModErr ee = rsh("cat " + sq(tmpdir) + "/err 2>/dev/null", err_s);
+            // 转义三个字段
+            auto jesc = [](const std::string& s) {
+                std::string r;
+                for (char c : s) {
+                    if (c == '\\') r += "\\\\";
+                    else if (c == '"') r += "\\\"";
+                    else if (c == '\n') r += "\\n";
+                    else if (c == '\r') r += "\\r";
+                    else if (c == '\t') r += "\\t";
+                    else r += c;
+                }
+                return r;
+            };
+            int errno_i = 0;
+            if (is_ok(ec)) { try { errno_i = std::stoi(code_s); } catch (...) { errno_i = -1; } }
+            else errno_i = -1;
+            std::string resp = "{\"errno\":" + std::to_string(errno_i) +
+                               ",\"stdout\":\"" + jesc(out_s) +
+                               "\",\"stderr\":\"" + jesc(err_s) + "\"}";
+            kernel_module::webui::send_json(conn, 200, resp);
+            return true;
+        }
+
         // ---- 状态 ----
         if (path == "/getStatus") {
             std::string resp = "{\"entry\":\"ok\",\"pid\":" + std::to_string(getpid()) +
