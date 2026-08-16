@@ -143,6 +143,31 @@ static bool safe_module_id(const std::string& id) {
     }
     return true;
 }
+// 校验"目录名"（用于卸载/运行等按真实目录名操作的地方）：
+//   只防路径穿越（禁止 '/' 与 '..'），其余字符都放行——目录名是文件系统能接受的
+//   任意名字（可能含括号、空格、点等，如脏数据 id "skzygiskcompat(5)"）。禁止 \0。
+static bool safe_dir_name(const std::string& s) {
+    if (s.empty() || s.size() > 255) return false;
+    if (s.find('/') != std::string::npos) return false;
+    if (s.find("..") != std::string::npos) return false;
+    if (s.find('\0') != std::string::npos) return false;
+    return true;
+}
+// 从 query string 里提取指定 key 的值并做 URL decode。
+// 前端用 encodeURIComponent 编码（如括号→%28），后端必须解码回原始目录名。
+static std::string get_query_param_decoded(struct mg_connection* conn, const std::string& key) {
+    std::string q = kernel_module::webui::get_request_query_string(conn); // 原始（未解码）query
+    std::string needle = key + "=";
+    size_t pos = q.find(needle);
+    if (pos == std::string::npos) return "";
+    std::string raw = q.substr(pos + needle.size());
+    size_t amp = raw.find('&');
+    if (amp != std::string::npos) raw = raw.substr(0, amp);
+    // URL decode（URI 编码，'+' 不是空格，故 is_form_url_encoded=false）
+    std::string decoded;
+    CivetServer::urlDecode(raw, decoded, false);
+    return decoded;
+}
 // 把 HTML 里的"根绝对路径"重写为模块子路径前缀 /module/<id>：
 //   模块的 webroot 常用 /assets/xxx、/internal/xxx 这类根绝对路径引用自身资源
 //   （KernelSU/APatch 的原生 WebUI 里模块界面挂在根路径，所以模块作者这么写）。
@@ -599,24 +624,12 @@ public:
 
         // ---- 运行 service.sh：执行 /data/adb/modules/<id>/service.sh ----
         if (path == "/runService") {
-            std::string q = kernel_module::webui::get_request_query_string(conn);
-            std::string id;
-            const std::string key = "id=";
-            size_t pos = q.find(key);
-            if (pos != std::string::npos) {
-                id = q.substr(pos + key.size());
-                size_t amp = id.find('&');
-                if (amp != std::string::npos) id = id.substr(0, amp);
-            }
+            std::string id = get_query_param_decoded(conn, "id");
             if (id.empty()) {
                 kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"缺少 id 参数\"}");
                 return true;
             }
-            bool safe = !id.empty();
-            for (char c : id) {
-                if (!(isalnum((unsigned char)c) || c == '_' || c == '-')) { safe = false; break; }
-            }
-            if (!safe) {
+            if (!safe_dir_name(id)) {
                 kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"非法 id\"}");
                 return true;
             }
@@ -638,27 +651,15 @@ public:
             return true;
         }
 
-        // ---- 卸载：删除 /data/adb/modules/<id>（id 从 query 取）----
+        // ---- 卸载：删除 /data/adb/modules/<id>（id 从 query 取，需 URL decode）----
         if (path == "/uninstall") {
-            std::string q = kernel_module::webui::get_request_query_string(conn);
-            std::string id;
-            const std::string key = "id=";
-            size_t pos = q.find(key);
-            if (pos != std::string::npos) {
-                id = q.substr(pos + key.size());
-                size_t amp = id.find('&');
-                if (amp != std::string::npos) id = id.substr(0, amp);
-            }
+            std::string id = get_query_param_decoded(conn, "id");
             if (id.empty()) {
                 kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"缺少 id 参数\"}");
                 return true;
             }
-            // 安全校验：id 仅允许字母数字下划线连字符，防路径穿越
-            bool safe = !id.empty();
-            for (char c : id) {
-                if (!(isalnum((unsigned char)c) || c == '_' || c == '-')) { safe = false; break; }
-            }
-            if (!safe) {
+            // 只防路径穿越（禁止 / 与 ..），其余字符（如括号、点）都放行——目录名就是文件系统名
+            if (!safe_dir_name(id)) {
                 kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"非法 id\"}");
                 return true;
             }
