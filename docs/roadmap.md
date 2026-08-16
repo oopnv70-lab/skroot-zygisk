@@ -18,9 +18,22 @@
 
 ## 阶段 2：Zygisk 能力可行性
 
-- [ ] 确认能否 hook zygote 的 fork / dlopen 路径
-- [ ] 确认 SELinux Enforcing 下的注入可行性
-- [ ] 选型：自研 / 旧版 GPL 源码重构 / 兼容层
+- [x] 确认能否 hook zygote 的 fork / dlopen 路径 → **不可行（见下方结论）**
+- [x] 确认 SELinux Enforcing 下的注入可行性 → **Enforcing 拦截；Permissive 下仅推进到「注入最后一步失败」**
+- [x] 选型：自研 / 旧版 GPL 源码重构 / 兼容层 → **兼容层（模块管理框架）已落地**
+
+### ⚠️ 阶段 2 结论（已定论，2026-08）
+
+经真机逐层排查（含 ZygiskNext bugreport 分析 + SELinux 实测）：
+
+1. **SKRoot Pro 的 root 是 `u:r:shell:s0` 域的容器 root**：`id` 显示 `uid=0(root)`，但 `context=u:r:shell:s0`；提权核是 `supervisor`（`/data/.../TEESimulatorRS_Core/supervisor`，由 init 拉起，同 shell 域）。
+2. **zygote 是 `u:r:zygote:s0` 域**，与 shell 域之间无 ptrace 授权规则。
+3. Zygisk-Next 的 `zygiskd` 注入 zygote 必然失败：`connect daemon failed with 22` → 随机名 `--suicide` 进程 SIGABRT → tombstone 堆积 → 前端 `Could not connect to service!`。
+4. `setenforce 0` 可进 Permissive（证明能降级 SELinux），但仅把错误推进到 `.magic` 已写出、报 `❌ Last injection failed!`——根因（容器够不到宿主机 zygote）不变。
+5. `znctl` 的 `dump-zn`/`status`/`znmod` 均依赖 zygiskd daemon，daemon 起不来则全部空转，无法「薅」到注入外的价值。
+
+> 最终判断：**本工程定位为「SKRoot 容器内的 Magisk 模块管理兼容层」**（安装/列表/卸载/WebUI/ksu 命令桥），
+> hook 注入能力需真机 Magisk/KernelSU/APatch，非本容器可达成。
 
 ## 阶段 3：最小可运行件（MVP）
 

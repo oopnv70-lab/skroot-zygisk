@@ -47,4 +47,10 @@ jobs:
         with:
           name: skzygiskcompat
           path: src/testModule/module_zygisk_compat/skzygiskcompat.zip
-          if-no-files-found: error
+      - name: Publish pre-release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src/testModule/module_zygisk_compat/skzygiskcompat.zip
+          prerelease: true
+          generate_release_notes: false

@@ -13,12 +13,24 @@
 
 ## 项目状态
 
-**阶段：1 — Magisk 模块安装/运行兼容层（已真机打通安装链路）**
+**阶段：模块管理兼容层已基本闭环；zygote 注入层结论为「SKRoot 容器不支持」。**
 
-已完成可编译、可运行的模块代码（`src/testModule/module_zygisk_compat/`），
-真机验证：上传→解压→落盘→权限→source 官方 util_functions.sh→customize.sh 完整跑通（退出码 0）。
-另有模块列表 / 卸载 / 运行 service.sh 的 WebUI，以及 `window.ksu.exec` 兼容桥（后端 /ksuExec + 前端 ksu-bridge.js）。
-运行层（zygote 注入）为后续阶段。详见 `docs/roadmap.md`。
+已完成可编译、可运行的模块代码（`src/testModule/module_zygisk_compat/`），真机验证闭环：
+
+- **安装**：上传 zip → 解压 → 落盘 `/data/adb/modules/<id>/` → 权限 → source 官方 util_functions.sh → customize.sh，完整跑通。
+- **列表**：扫描 `/data/adb/modules/` 展示 id/name/version/author/description，标记 `hasWebui`。
+- **卸载**：支持任意目录名（含括号等特殊字符），修复了 query URL decode 与校验过严两个缺陷。
+- **通用模块 WebUI 代理**：任意带 `webroot/` 的模块可点开自己的第二个界面；对 `.html` 注入 `window.ksu.exec` 兼容桥，并重写模块 index.html 里的根绝对路径到模块子路径。
+- **ksu.exec 兼容桥**：后端 `/ksuExec` + 前端 `ksu-bridge.js`，对齐 KernelSU 三参回调契约。
+
+### ⚠️ zygote 注入的结论（重要）
+
+经真机逐层排查（含 bugreport 分析），确认 **SKRoot Pro 的 root 是 `u:r:shell:s0` 域的容器 root（提权核 `supervisor` 同域），无法 ptrace 到宿主机的 `u:r:zygote:s0` 域 zygote 进程**。因此：
+
+- Zygisk-Next 的 `zygiskd` 注入 zygote **必然失败**（`connect daemon failed` → `--suicide` 循环 → tombstone 堆积 → 前端 `Could not connect to service!`）。
+- 即便 `setenforce 0` 进 Permissive，也仅推进到「注入最后一步失败」（`.magic` 已写出、报 `Last injection failed`），根因不变。
+
+结论：**本工程可作为 SKRoot 容器内的「Magisk 模块管理框架」交付（安装/列表/卸载/WebUI/命令桥），但 hook 注入能力需真机 Magisk/KernelSU/APatch。** 详见 `docs/device-probe.md` 与 `docs/roadmap.md`。
 ## 目标
 
 1. 摸清 SKRoot Pro 的模块加载机制与 SDK 接口（基于实机，非假设）。
