@@ -72,9 +72,9 @@ skroot-zygisk/
 
 ---
 
-## 目前遇到的问题
+## 目前遇到的问题（核心问题）
 
-### 问题一：zygote 注入走不通（三条硬墙叠加）
+### zygote 注入走不通（三条硬墙叠加）
 
 想要让 Zygisk 以原生 Magisk 的方式「一次性注入 zygote、所有 App 自动继承 hook」，在这台设备上是死路。三层原因叠加：
 
@@ -83,18 +83,6 @@ skroot-zygisk/
 3. **内核封死内存口**：`/proc/<pid>/mem` 对进程整体返回 I/O error（连 supervisor 自己、连已注入成功的 App 都读不了），直接读写内存这条路被厂商封死。
 
 实测：即便 `setenforce 0` 进 Permissive、`runcon u:r:zygote:s0` 切域，都跨不过第 3 层（读 mem 仍 I/O error）。Zygisk-Next 的 `zygiskd` 因此 `connect daemon failed` → `--suicide` 循环 → tombstone 堆积 → 前端 `Could not connect to service!`。
-
-### 问题二：LSPosed 安装被 Magisk 版本门槛拦截（已修复）
-
-LSPosed v2.1.1 的 `customize.sh` 会检查 `MAGISK_VER_CODE`，其门槛实际是 26403（文案误写 "Magisk v27+"），而我们最初硬编码的 26402（为满足 Zygisk-Next 的 ≥26402）正好被拦。
-
-**修复**：`MAGISK_VER_CODE` 改为 `28101`（Magisk v28.1），同时满足 Zygisk-Next（≥26402）与 LSPosed（≥26403）。另需预创建 `/data/adb/lspd/skip_online_request` 跳过 LSPosed 的 license 联网请求。
-
-### 问题三：LSPosed 能装但没有"打开"界面
-
-LSPosed 的界面不是 webroot 网页，而是一个独立的 `manager.apk`（包名 `org.lsposed.manager`）。SKZygiskCompat 现有的 WebUI 代理只覆盖 webroot 型模块，未覆盖 APK 型模块。
-
-**现状**：已手动 `pm install` 安装 manager.apk，并用 `am start -n org.lsposed.manager/.ui.activity.MainActivity` 启动。**尚未实现**后端增强（`/list` 加 `hasApk` 标记 + `/module/<id>/open-apk` 路由 + 前端"打开 App"按钮）。
 
 ---
 
