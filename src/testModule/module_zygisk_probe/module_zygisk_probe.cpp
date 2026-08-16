@@ -7,13 +7,11 @@
 
 using namespace skroot_env;
 
-// to_string(KModErr) 是 module_err_def.h 里的全局函数，直接使用，无需 using。
-
 // 全局保存，供 WebUI 使用
 static std::string g_root_key;
 static std::string g_private_dir;
 
-// 把一行结果同时打到 stdout 和 SKRoot 日志
+// 到 stdout
 static void log_report(const std::string& line) {
     printf("[SKZygiskProbe] %s\n", line.c_str());
 }
@@ -24,7 +22,7 @@ int skroot_module_main(const char* root_key, const char* module_private_dir) {
     g_private_dir = module_private_dir ? module_private_dir : "";
 
     printf("[SKZygiskProbe] === entry called ===\n");
-    printf("[SKZygiskProbe] root_key_len=%zu\n", strlen(root_key));
+    printf("[SKZygiskProbe] root_key_len=%zu\n", root_key ? strlen(root_key) : 0);
 
     // 1. 开日志
     KModErr e = set_skroot_log_enabled(root_key, true);
@@ -34,7 +32,7 @@ int skroot_module_main(const char* root_key, const char* module_private_dir) {
     e = get_root(root_key);
     log_report("get_root => " + to_string(e));
 
-    // 3. 执行 id（验证 root 身份是否真实）
+    // 3. 执行 id
     std::string out;
     e = run_root_cmd(root_key, "id", out);
     log_report("run_root_cmd(id) => " + to_string(e) + " | out=[" + out + "]");
@@ -43,7 +41,7 @@ int skroot_module_main(const char* root_key, const char* module_private_dir) {
     e = run_root_cmd(root_key, "uname -a", out);
     log_report("run_root_cmd(uname -a) => " + to_string(e) + " | out=[" + out + "]");
 
-    // 5. mount 里 data 相关（验证 /data 挂载现状）
+    // 5. mount data
     e = run_root_cmd(root_key, "mount | grep -i data", out);
     log_report("run_root_cmd(mount|grep data) => " + to_string(e) + " | out=[" + out + "]");
 
@@ -58,9 +56,9 @@ int skroot_module_main(const char* root_key, const char* module_private_dir) {
     }
 
     // 7. SKRoot 基础能力自测
-    for (int i = 0; i <= 5; ++i) {
+    for (uint32_t i = 0; i <= 5; ++i) {
         std::string r;
-        KModErr ee = test_skroot_basics(root_key, (BasicItem)i, r);
+        KModErr ee = test_skroot_basics(root_key, static_cast<BasicItem>(i), r);
         log_report("test_basics[" + std::to_string(i) + "] => " + to_string(ee) + " | out=[" + r + "]");
     }
 
@@ -68,7 +66,7 @@ int skroot_module_main(const char* root_key, const char* module_private_dir) {
     return 0;
 }
 
-// WebUI：提供 /getLog 端点，把 SKRoot 日志读出来显示
+// WebUI
 class ZygiskProbeWebHandler : public kernel_module::WebUIHttpHandler {
 public:
     void onPrepareCreate(const char* root_key, const char* module_private_dir, uint32_t port) override {
@@ -80,14 +78,14 @@ public:
     bool handleGet(CivetServer* server, struct mg_connection* conn, const std::string& path, const std::string& query) override {
         (void)server; (void)conn; (void)query;
         printf("[SKZygiskProbe] GET %s\n", path.c_str());
-        return false; // 默认静态文件服务
+        return false;
     }
 
     bool handlePost(CivetServer* server, struct mg_connection* conn, const std::string& path, const std::string& body) override {
         (void)server; (void)body;
         printf("[SKZygiskProbe] POST %s\n", path.c_str());
 
-        if (path == "/getLog") {
+        if (path == "/getLog" || path == "/getReport") {
             std::string log;
             KModErr e = read_skroot_log(g_root_key.c_str(), log);
             if (is_ok(e)) {
@@ -96,13 +94,6 @@ public:
                 std::string msg = "read_skroot_log failed: " + to_string(e);
                 kernel_module::webui::send_text(conn, 500, msg);
             }
-            return true;
-        }
-
-        if (path == "/getReport") {
-            std::string log;
-            read_skroot_log(g_root_key.c_str(), log);
-            kernel_module::webui::send_text(conn, 200, log);
             return true;
         }
 
@@ -115,5 +106,5 @@ SKROOT_MODULE_NAME("SKZygiskProbe")
 SKROOT_MODULE_VERSION("0.1.0")
 SKROOT_MODULE_DESC("probe: verify root/cmd/module-list on SKRoot Pro")
 SKROOT_MODULE_AUTHOR("oopnv70-lab")
-SKROOT_MODULE_ID32("c3a2f8b1e5d044679abcdef0123456789")
+SKROOT_MODULE_ID32("abcdef0123456789abcdef0123456789")
 SKROOT_MODULE_WEB_UI(ZygiskProbeWebHandler)
