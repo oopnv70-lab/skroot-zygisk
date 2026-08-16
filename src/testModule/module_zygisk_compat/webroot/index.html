@@ -26,19 +26,6 @@
 <body>
   <h1>SKZygiskCompat — Magisk 模块兼容层</h1>
   <div id="status">加载中...</div>
-
-  <!-- 注入 KernelSU 兼容桥：window.ksu.exec → 后端 /ksuExec（root shell） -->
-  <script src="ksu-bridge.js"></script>
-
-  <h2>Zygisk Next 控制面板</h2>
-  <div class="card">
-    <div class="mod-meta">通过 ksu.exe 桥执行 Zygisk Next 的 znctl 命令（等价其原生界面按钮）</div>
-    <button class="btn btn-run" onclick="znStatus()">读取状态</button>
-    <button class="btn btn-run" onclick="znDump()">znctl dump-zn</button>
-    <button class="btn btn-run" onclick="znSwitch()">denylist 开关</button>
-    <button class="btn btn-run" onclick="znAction()">触发 action.sh</button>
-  </div>
-
   <h2>已安装模块</h2>
   <button id="refreshBtn" class="btn btn-refresh">刷新列表</button>
   <div id="moduleList"><div class="empty">加载中...</div></div>
@@ -72,17 +59,26 @@
         box.innerHTML = '<div class="empty">（暂无已安装模块）</div>';
         return;
       }
-      box.innerHTML = mods.map(m =>
-        '<div class="card">' +
+      box.innerHTML = mods.map(m => {
+        const openBtn = m.hasWebui
+          ? '<button class="btn btn-run" onclick="openWebui(\'' + esc(m.id) + '\')">打开界面</button>'
+          : '';
+        return '<div class="card">' +
           '<div class="mod-name">' + esc(m.name) + ' <span style="color:#999;font-weight:400;">(' + esc(m.id) + ')</span></div>' +
           '<div class="mod-meta">版本 ' + esc(m.version) + ' · 作者 ' + esc(m.author) + '</div>' +
           '<div class="mod-desc">' + esc(m.description) + '</div>' +
           '<div style="margin-top:8px;">' +
+            openBtn +
             '<button class="btn btn-run" onclick="runService(\'' + esc(m.id) + '\')">运行 service.sh</button>' +
             '<button class="btn btn-danger" onclick="uninstall(\'' + esc(m.id) + '\')">卸载</button>' +
           '</div>' +
-        '</div>'
-      ).join('');
+        '</div>';
+      }).join('');
+    }
+    // 打开某模块自己的 WebUI（第二个界面）：通用代理 /module/<id>/index.html
+    function openWebui(id) {
+      const url = '/module/' + encodeURIComponent(id) + '/index.html';
+      window.open(url, '_blank');
     }
 
     async function refreshList() {
@@ -149,42 +145,8 @@
       } catch (e) { setResult('安装请求失败：' + e); }
     }
 
-    // ===== Zygisk Next 控制面板：通过 window.ksu.exec 桥执行 znctl =====
-    function runZn(cmd) {
-      setResult('执行：' + cmd + '\n…');
-      return new Promise((resolve) => {
-        const cb = 'zncb_' + Date.now() + '_' + Math.floor(Math.random() * 1e6);
-        window[cb] = (errno, stdout, stderr) => {
-          delete window[cb];
-          setResult('命令：' + cmd + '\n退出码：' + errno +
-                    '\n\n[stdout]\n' + (stdout || '(空)') +
-                    '\n\n[stderr]\n' + (stderr || '(空)'));
-          resolve({ errno, stdout, stderr });
-        };
-        try {
-          window.ksu.exec(cmd, null, cb);
-        } catch (e) {
-          delete window[cb];
-          setResult('ksu.exec 调用异常：' + e);
-          resolve({ errno: -1, stdout: '', stderr: String(e) });
-        }
-      });
-    }
-    function znStatus() {
-      runZn("echo '--- denylist ---'; cat /data/adb/zygisksu/enforce_denylist 2>&1; " +
-            "echo '--- memory-type ---'; cat /data/adb/zygisksu/memory_type 2>&1; " +
-            "echo '--- linker ---'; cat /data/adb/zygisksu/linker 2>&1; " +
-            "echo '--- magic ---'; ls -la /data/adb/zygisksu/.magic 2>&1");
-    }
-    function znDump() { runZn('/data/adb/modules/zygisksu/bin/zygiskd dump-zn 2>&1'); }
-    function znSwitch() {
-      runZn("cur=$(cat /data/adb/zygisksu/enforce_denylist 2>/dev/null); " +
-            "[ \"$cur\" = \"1\" ] && v=0 || v=1; " +
-            "echo $v > /data/adb/zygisksu/enforce_denylist 2>&1; " +
-            "echo \"switched to $v\"");
-    }
-    function znAction() { runZn('ZYGISK_ENABLED=1 sh /data/adb/modules/zygisksu/action.sh 2>&1'); }
-
+    // ===== 通用模块界面：通过列表"打开界面"按钮，代理到各模块自己的 webroot（第二界面） =====
+    // ksu.exec 兼容桥已注入第二界面（各模块 index.html 的 <head> 后），无需在第一界面实现。
     document.addEventListener('DOMContentLoaded', () => {
       getStatus();
       refreshList();

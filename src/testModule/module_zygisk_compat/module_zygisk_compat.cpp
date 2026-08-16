@@ -69,6 +69,80 @@ static std::string trim_trailing_slash(const std::string& s) {
 static std::string join_path(const std::string& base, const std::string& sub) {
     return trim_trailing_slash(base) + "/" + sub;
 }
+// ============ 通用模块 WebUI 代理：把任意模块的 webroot 当作可访问站点 ============
+// base64 解码（自实现，二进制安全，把 root shell 读回的 base64 还原成原始字节）
+static std::string b64_decode(const std::string& in) {
+    static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int rev[256];
+    for (int i = 0; i < 256; i++) rev[i] = -1;
+    for (int i = 0; i < 64; i++) rev[(unsigned char)tbl[i]] = i;
+    std::string out;
+    out.reserve(in.size() * 3 / 4 + 4);
+    int val = 0, bits = -8;
+    for (unsigned char c : in) {
+        if (c == '\n' || c == '\r' || c == ' ' || c == '\t') continue;
+        if (c == '=') break;
+        int d = rev[c];
+        if (d < 0) continue;
+        val = (val << 6) | d;
+        bits += 6;
+        if (bits >= 0) {
+            out.push_back((char)((val >> bits) & 0xFF));
+            bits -= 8;
+        }
+    }
+    return out;
+}
+// 通过 root 读取任意文件为二进制（base64 中转，避免 shell 对 \0/特殊字节的破坏）
+// 成功返回 true，失败返回 false（文件不存在或读取失败）
+static bool root_read_file_bin(const std::string& path, std::string& out) {
+    out.clear();
+    std::string b64;
+    // base64 命令（toybox 提供）：-w0 不换行；文件不存在时 2>/dev/null 吞掉报错输出空串
+    KModErr e = rsh("base64 -w0 " + sq(path) + " 2>/dev/null", b64);
+    if (is_failed(e) && b64.empty()) return false;
+    if (b64.empty()) {
+        // 空文件合法（返回空内容但存在）；区分"不存在"与"空文件"需另判
+        std::string chk;
+        KModErr ce = rsh("test -f " + sq(path) + " && echo EXISTS || echo MISSING", chk);
+        if (is_failed(ce) || chk.find("MISSING") != std::string::npos) return false;
+        return true; // 空文件存在
+    }
+    out = b64_decode(b64);
+    return true;
+}
+// 依据路径扩展名返回 Content-Type（供 send_bytes 使用）
+static const char* mime_of(const std::string& path) {
+    auto ends = [&](const char* ext) {
+        size_t n = strlen(ext);
+        return path.size() >= n && path.compare(path.size() - n, n, ext) == 0;
+    };
+    if (ends(".html") || ends(".htm")) return "text/html; charset=utf-8";
+    if (ends(".js") || ends(".mjs")) return "application/javascript; charset=utf-8";
+    if (ends(".css")) return "text/css; charset=utf-8";
+    if (ends(".json")) return "application/json; charset=utf-8";
+    if (ends(".png")) return "image/png";
+    if (ends(".jpg") || ends(".jpeg")) return "image/jpeg";
+    if (ends(".gif")) return "image/gif";
+    if (ends(".svg")) return "image/svg+xml";
+    if (ends(".ico")) return "image/x-icon";
+    if (ends(".woff")) return "font/woff";
+    if (ends(".woff2")) return "font/woff2";
+    if (ends(".ttf")) return "font/ttf";
+    if (ends(".wasm")) return "application/wasm";
+    if (ends(".map")) return "application/json";
+    if (ends(".txt")) return "text/plain; charset=utf-8";
+    if (ends(".webmanifest")) return "application/manifest+json";
+    return "application/octet-stream";
+}
+// 校验模块 id：只允许安全字符（字母数字 _ - .），禁止路径穿越与 shell 注入
+static bool safe_module_id(const std::string& id) {
+    if (id.empty() || id.size() > 128) return false;
+    for (char c : id) {
+        if (!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.')) return false;
+    }
+    return true;
+}
 
 // ============ 安装一个 Magisk 模块 zip（复刻 Magisk install_module 的 6 步） ============
 // 输入：zip_path = 已上传落盘的模块 zip 绝对路径
@@ -259,7 +333,55 @@ public:
 
     bool handleGet(CivetServer* server, struct mg_connection* conn, const std::string& path, const std::string& query) override {
         printf("[SKZygiskCompat] GET path=%s query=%s\n", path.c_str(), query.c_str());
-        return false; // 走 civetweb 默认静态文件服务，返回 webroot/index.html
+        // ---- 通用模块 WebUI 代理：/module/<id>/<路径> → /data/adb/modules/<id>/webroot/<路径> ----
+        // 任何带 webroot/ 的 Magisk 模块，装进来后都能从模块列表点开自己的第二个界面。
+        const std::string MP = "/module/";
+        if (path.size() >= MP.size() && path.compare(0, MP.size(), MP) == 0) {
+            std::string rest = path.substr(MP.size()); // id 之后的剩余路径（可能是 "zygisksu/index.html" 或 "zygisksu/assets/xxx.js"）
+            // 拆出 <id> 和 <子路径>
+            size_t slash = rest.find('/');
+            std::string id = (slash == std::string::npos) ? rest : rest.substr(0, slash);
+            std::string sub = (slash == std::string::npos) ? "" : rest.substr(slash + 1);
+            // 若请求 /module/<id>（无子路径），默认跳 index.html
+            if (sub.empty()) sub = "index.html";
+            // 安全校验：id 必须安全；子路径禁止含 ".."（防 /data/adb/modules 外穿越）
+            if (!safe_module_id(id) || sub.find("..") != std::string::npos) {
+                kernel_module::webui::send_text(conn, 400, "bad module id / path");
+                return true;
+            }
+            std::string file = "/data/adb/modules/" + id + "/webroot/" + sub;
+            std::string content;
+            if (!root_read_file_bin(file, content)) {
+                kernel_module::webui::send_text(conn, 404, "module webui file not found: " + file);
+                return true;
+            }
+            // 对 .html 注入 ksu 兼容桥（方案 A：不修改模块原文件，运行时改写响应）
+            std::string out = content;
+            const char* ctype = mime_of(sub);
+            if (sub.size() >= 5 && (sub.compare(sub.size() - 5, 5, ".html") == 0 ||
+                                    sub.compare(sub.size() - 4, 4, ".htm") == 0)) {
+                const std::string script = "<script src=\"/ksu-bridge.js\"></script>";
+                // 优先插到 <head> 之后（紧随其后，保证最先加载）；找不到则在文档开头注入
+                size_t hp = out.find("<head>");
+                if (hp != std::string::npos) {
+                    out.insert(hp + 6, script);
+                } else {
+                    size_t hp2 = out.find("<head ");
+                    if (hp2 != std::string::npos) {
+                        size_t gt = out.find('>', hp2);
+                        if (gt != std::string::npos) out.insert(gt + 1, script);
+                        else out = script + out;
+                    } else {
+                        out = script + out;
+                    }
+                }
+                ctype = "text/html; charset=utf-8";
+            }
+            kernel_module::webui::send_bytes(conn, 200, ctype, out.data(), out.size());
+            return true;
+        }
+        // /ksu-bridge.js 走 civetweb 静态服务（webroot/ksu-bridge.js 已随本模块落盘，所有模块界面共享引用）
+        return false; // 其余（含 / 首页、/ksu-bridge.js）走 civetweb 默认静态文件服务
     }
     // 重写基类的两参 handlePost：基类把 body 上限写死 256KB，会导致大模块 zip 直接 413。
     // 这里用更大的上限（64MB）读取，再转回四参版本交给子类业务逻辑。
@@ -362,7 +484,8 @@ public:
         // ---- 列表：扫描 /data/adb/modules/ 下已装模块 ----
         if (path == "/list") {
             std::string out;
-            // 一条 shell 扫描：输出 id|name|version|author|description（分隔符 |，字段用 tr 去 \r）
+            // 一条 shell 扫描：输出 id|name|version|author|description|hasWebui
+            // hasWebui = webroot/index.html 是否存在（1/0），用于前端渲染"打开界面"按钮
             KModErr e = rsh(
                 "for d in /data/adb/modules/*/; do [ -d \"$d\" ] || continue; "
                 "id=$(basename \"$d\"); f=\"$d/module.prop\"; [ -f \"$f\" ] || continue; "
@@ -370,12 +493,12 @@ public:
                 "ver=$(sed -n 's/^version=//p' \"$f\" | tr -d '\\r'); "
                 "auth=$(sed -n 's/^author=//p' \"$f\" | tr -d '\\r'); "
                 "desc=$(sed -n 's/^description=//p' \"$f\" | tr -d '\\r'); "
-                "echo \"$id|$name|$ver|$auth|$desc\"; done 2>&1", out);
+                "if [ -f \"$d/webroot/index.html\" ]; then w=1; else w=0; fi; "
+                "echo \"$id|$name|$ver|$auth|$desc|$w\"; done 2>&1", out);
             std::string resp;
             if (is_failed(e)) {
                 resp = "{\"ok\":false,\"error\":\"" + to_string(e) + "\"}";
             } else {
-                // 解析每行 id|name|version|author|description，拼 JSON 数组
                 std::string arr = "[";
                 size_t p = 0;
                 bool first = true;
@@ -385,16 +508,23 @@ public:
                     if (!line.empty() && line.back() == '\r') line.pop_back();
                     p = (nl == std::string::npos) ? out.size() : nl + 1;
                     if (line.empty()) continue;
-                    // 拆 5 段（id|name|version|author|description），description 可能含 |，只拆前 4 个
-                    std::string f[5];
+                    // 拆前 4 段 id|name|version|author，剩余 = description|hasWebui
+                    std::string f[4];
                     size_t pos = 0;
+                    bool bad = false;
                     for (int i = 0; i < 4; i++) {
                         size_t bar = line.find('|', pos);
-                        if (bar == std::string::npos) { f[i] = (i == 0) ? line.substr(pos) : ""; pos = line.size(); }
-                        else { f[i] = line.substr(pos, bar - pos); pos = bar + 1; }
+                        if (bar == std::string::npos) { bad = true; break; }
+                        f[i] = line.substr(pos, bar - pos);
+                        pos = bar + 1;
                     }
-                    f[4] = line.substr(pos); // 剩余全部作为 description
-                    // JSON 转义各字段
+                    if (bad) continue;
+                    std::string rest = line.substr(pos); // description|hasWebui
+                    // 从最后一个 | 处拆：左边 description（可含 |），右边 hasWebui
+                    std::string desc, has;
+                    size_t lastbar = rest.rfind('|');
+                    if (lastbar == std::string::npos) { desc = rest; has = "0"; }
+                    else { desc = rest.substr(0, lastbar); has = rest.substr(lastbar + 1); }
                     auto jesc = [](const std::string& s) {
                         std::string r;
                         for (char c : s) {
@@ -411,7 +541,8 @@ public:
                     first = false;
                     arr += "{\"id\":\"" + jesc(f[0]) + "\",\"name\":\"" + jesc(f[1]) +
                            "\",\"version\":\"" + jesc(f[2]) + "\",\"author\":\"" + jesc(f[3]) +
-                           "\",\"description\":\"" + jesc(f[4]) + "\"}";
+                           "\",\"description\":\"" + jesc(desc) + "\",\"hasWebui\":" +
+                           (has == "1" ? "true" : "false") + "}";
                 }
                 arr += "]";
                 resp = "{\"ok\":true,\"modules\":" + arr + "}";
