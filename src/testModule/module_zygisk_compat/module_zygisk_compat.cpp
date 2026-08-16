@@ -68,6 +68,89 @@ static std::string join_path(const std::string& base, const std::string& sub) {
     return trim_trailing_slash(base) + "/" + sub;
 }
 
+// ============ Magisk 脚本仿真 shim（shell prologue） ============
+// Magisk 模块的 customize.sh 不能裸 sh 跑：它依赖 Magisk 在 source 脚本前注入的
+// 一整套内置函数（ui_print/abort/grep_prop/set_perm 等）和一组环境变量
+// （MODPATH/MODID/ZIPFILE/ARCH/API/BOOTMODE/OUTFD 等）。
+//
+// 本函数生成一段 shell prologue，由调用方用 heredoc 喂给 sh，再 source 目标脚本。
+// prologue 语义对齐 Magisk 官方 util_functions.sh（关键函数签名/变量名一致），
+// 但只实现足够让模块脚本跑过"业务逻辑"的最小闭环，不包含真正的挂载/sepolicy。
+static std::string build_magisk_shim(const std::string& modroot,
+                                     const std::string& modid,
+                                     const std::string& zip_path) {
+    std::string p;
+    // --- 环境变量（对齐 Magisk install_module/setup 的注入） ---
+    p += "MODPATH='" + modroot + "'\n";          // 模块落盘目录
+    p += "MODID='" + modid + "'\n";              // 模块 id
+    p += "ZIPFILE='" + zip_path + "'\n";         // 上传的 zip 绝对路径
+    p += "MODNAME='" + modid + "'\n";            // 模块名（取 id 兜底）
+    p += "MODAUTH=\n";                            // 认证信息（Magisk 默认空）
+    p += "OUTFD=1\n";                             // ui_print 输出到 stdout
+    p += "BOOTMODE=true\n";                       // 视为已启动模式（非 recovery）
+    p += "TMPDIR=/dev/tmp\n";                     // 临时目录
+    p += "MAGISKBIN=/data/adb/magisk\n";          // magisk 二进制目录
+    p += "ARCH=arm64\n";                          // 探测不到的架构兜底（真机 arm64）
+    p += "ABI=arm64-v8a\n";
+    p += "IS64BIT=true\n";
+    p += "API=34\n";                              // Android 14 兜底（实际应探测，暂兜底）
+    p += "ASH_STANDALONE=1\n";                    // 独立 busybox shell
+    p += "REPLACE=\n";                            // Magisk install_module 默认为空
+    p += "REMOVE=\n";
+    p += "\n";
+    // --- ui_print：对齐 util_functions.sh（用 [ ] 而非 [[ ]]，保证 dash/mksh 兼容） ---
+    p += "ui_print() {\n";
+    p += "  if $BOOTMODE; then echo \"$1\"; else echo -e \"ui_print $1\\nui_print\" >> /proc/self/fd/$OUTFD; fi\n";
+    p += "}\n";
+    // --- grep_prop / grep_get_prop：对齐 util_functions.sh 第 43/51 行 ---
+    p += "grep_prop() { local REGEX=\"s/^$1=//p\"; shift; local FILES=\"$@\";\n";
+    p += "  [ -z \"$FILES\" ] && FILES='/system/build.prop';\n";
+    p += "  cat $FILES 2>/dev/null | sed -n \"$REGEX\" 2>/dev/null | head -n 1; }\n";
+    p += "grep_get_prop() { local result=$(grep_prop \"$@\");\n";
+    p += "  if [ -z \"$result\" ]; then getprop \"$1\"; else echo \"$result\"; fi; }\n";
+    // --- getvar：对齐 util_functions.sh 第 61 行 ---
+    p += "getvar() { local VARNAME=$1; local VALUE=;\n";
+    p += "  VALUE=$(grep_prop $VARNAME /sdk.prop /default.prop /system/build.prop 2>/dev/null);\n";
+    p += "  [ -z \"$VALUE\" ] && VALUE=$(getprop $VARNAME 2>/dev/null);\n";
+    p += "  [ -z \"$VALUE\" ] || eval \"$VARNAME=\\$VALUE\"; }\n";
+    // --- abort：对齐 util_functions.sh 第 75 行（会清理 MODPATH + TMPDIR） ---
+    p += "abort() { ui_print \"$1\"; [ -z \"$MODPATH\" ] || rm -rf \"$MODPATH\"; rm -rf \"$TMPDIR\" 2>/dev/null; exit 1; }\n";
+    // --- api_level_arch_detect：对齐 util_functions.sh，动态探测而非硬编码 ---
+    p += "api_level_arch_detect() {\n";
+    p += "  API=$(grep_get_prop ro.build.version.sdk);\n";
+    p += "  ABI=$(grep_get_prop ro.product.cpu.abi);\n";
+    p += "  [ -z \"$API\" ] && API=34;\n";
+    p += "  [ -z \"$ABI\" ] && ABI='arm64-v8a';\n";
+    p += "  if [ \"$ABI\" = \"arm64-v8a\" ]; then ARCH=arm64; ABI32=armeabi-v7a; IS64BIT=true;\n";
+    p += "  elif [ \"$ABI\" = \"x86_64\" ]; then ARCH=x64; ABI32=x86; IS64BIT=true;\n";
+    p += "  elif [ \"$ABI\" = \"armeabi-v7a\" ]; then ARCH=arm; ABI32=armeabi-v7a; IS64BIT=false;\n";
+    p += "  elif [ \"$ABI\" = \"x86\" ]; then ARCH=x86; ABI32=x86; IS64BIT=false;\n";
+    p += "  elif [ \"$ABI\" = \"riscv64\" ]; then ARCH=riscv64; ABI32=riscv32; IS64BIT=true;\n";
+    p += "  fi; }\n";
+    // --- set_perm：对齐 util_functions.sh 第 604 行（target owner group mode [context]） ---
+    p += "set_perm() {\n";
+    p += "  chown $2:$3 \"$1\" 2>/dev/null || return 1\n";
+    p += "  chmod $4 \"$1\" 2>/dev/null || return 1\n";
+    p += "  local CON=$5\n";
+    p += "  [ -z \"$CON\" ] && CON=u:object_r:system_file:s0\n";
+    p += "  command -v chcon >/dev/null 2>&1 && chcon \"$CON\" \"$1\" 2>/dev/null\n";
+    p += "  return 0\n";
+    p += "}\n";
+    p += "set_perm_recursive() {\n";
+    p += "  find \"$1\" -type d 2>/dev/null | while read dir; do\n";
+    p += "    set_perm \"$dir\" $2 $3 $4 $6\n";
+    p += "  done\n";
+    p += "  find \"$1\" -type f 2>/dev/null | while read file; do\n";
+    p += "    set_perm \"$file\" $2 $3 $5 $6\n";
+    p += "  done\n";
+    p += "  return 0\n";
+    p += "}\n";
+    // --- mktouch：对齐 util_functions.sh 第 621 行 ---
+    p += "mktouch() { mkdir -p \"${1%/*}\" 2>/dev/null; [ -z \"$2\" ] && touch \"$1\" || echo \"$2\" > \"$1\"; chmod 644 \"$1\" 2>/dev/null; }\n";
+    p += "\n";
+    return p;
+}
+
 // ============ 安装一个 Magisk 模块 zip（复刻 Magisk install_module 的 6 步） ============
 // 输入：zip_path = 已上传落盘的模块 zip 绝对路径
 // 输出：report 收集中文报告，返回 true=成功，false=失败
@@ -172,10 +255,22 @@ static bool do_install_magisk_module(const std::string& zip_path, std::string& r
         }
     }
     // 5) 执行脚本：先 customize.sh（若存在），再 service.sh（复刻生命周期）
+    //    customize.sh 通过 Magisk shim 仿真环境 source 执行（而不是裸 sh），
+    //    使 ui_print/abort/grep_prop/set_perm 等内置函数和 MODPATH/ZIPFILE 等变量可用。
     {
-        add("[5a] 执行 customize.sh");
+        add("[5a] 执行 customize.sh（shim 仿真环境）");
+        std::string shim = build_magisk_shim(modroot, modid, zip_path);
+        // 把 shim prologue 写到模块目录下的 .skroot_shim.sh，再 source 它 + customize.sh
+        std::string shim_file = join_path(modroot, ".skroot_shim.sh");
+        KModErr ew = rsh("cat > " + sq(shim_file) + " <<'SKROOT_SHIM_EOF'\n"
+                        + shim + "SKROOT_SHIM_EOF\n"
+                        "chmod 0644 " + sq(shim_file) + " 2>&1; echo rc=$?", out);
+        if (!is_ok(ew) || out.find("rc=0") == std::string::npos) {
+            add("  ✗ shim 落盘失败 err=" + to_string(ew) + " out=" + out);
+        }
         KModErr e = rsh("if [ -f " + sq(modroot) + "/customize.sh ]; then "
-                        "  echo '--- customize.sh 开始 ---'; sh " + sq(modroot) + "/customize.sh 2>&1; echo '--- customize.sh 退出码='$?; "
+                        "  echo '--- customize.sh 开始（shim）---'; "
+                        "  sh -c '. " + sq(shim_file) + "; api_level_arch_detect; . " + sq(modroot) + "/customize.sh' 2>&1; echo '--- customize.sh 退出码='$?; "
                         "else echo '（无 customize.sh）'; fi", out);
         add("  " + (is_ok(e) ? out : ("err=" + to_string(e) + " out=" + out)));
     }
