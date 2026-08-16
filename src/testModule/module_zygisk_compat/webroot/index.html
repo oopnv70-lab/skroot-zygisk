@@ -4,87 +4,146 @@
   <meta charset="utf-8" />
   <title>SKZygiskCompat</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 860px; margin: 0 auto; padding: 16px; background: #f5f6f8; color: #222; }
+    h1 { font-size: 1.4em; }
+    h2 { font-size: 1.1em; margin: 24px 0 8px; border-bottom: 2px solid #ddd; padding-bottom: 4px; }
+    .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+    .mod-name { font-weight: 700; font-size: 1.05em; }
+    .mod-meta { color: #666; font-size: 0.85em; margin: 4px 0; }
+    .mod-desc { color: #444; font-size: 0.9em; }
+    .btn { border: none; border-radius: 5px; padding: 6px 12px; cursor: pointer; font-size: 0.85em; margin-right: 6px; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+    .btn-run { background: #3498db; color: #fff; }
+    .btn-refresh { background: #2ecc71; color: #fff; }
+    .btn-upload { background: #8e44ad; color: #fff; }
+    .btn-install { background: #e67e22; color: #fff; }
+    #status { font-size: 0.9em; color: #888; margin-bottom: 16px; }
+    #result { white-space: pre-wrap; word-break: break-all; background: #111; color: #0f0; padding: 1em; min-height: 200px; border-radius: 6px; font-family: monospace; }
+    .empty { color: #999; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>SKZygiskCompat — Magisk 模块兼容层</h1>
+  <div id="status">加载中...</div>
+
+  <h2>已安装模块</h2>
+  <button id="refreshBtn" class="btn btn-refresh">刷新列表</button>
+  <div id="moduleList"><div class="empty">加载中...</div></div>
+
+  <h2>安装新模块</h2>
+  <div class="card">
+    <input type="file" id="file" accept=".zip" />
+    <button id="uploadBtn" class="btn btn-upload">上传</button>
+    <button id="installBtn" class="btn btn-install">安装并运行</button>
+  </div>
+
+  <h3>操作结果</h3>
+  <pre id="result">（待操作）</pre>
+
   <script>
     function getStatus() {
       fetch('/getStatus', { method: 'POST', body: '' })
         .then(r => r.json())
         .then(d => { document.getElementById('status').textContent =
-          "入口已调用 | PID=" + d.pid + " | UID=" + d.uid; })
-        .catch(e => { document.getElementById('status').textContent = "请求失败：" + e; });
+          "运行中 | PID=" + d.pid + " | UID=" + d.uid; })
+        .catch(e => { document.getElementById('status').textContent = "状态请求失败：" + e; });
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'"'}[c]));
+    }
+
+    function renderList(mods) {
+      const box = document.getElementById('moduleList');
+      if (!mods || !mods.length) {
+        box.innerHTML = '<div class="empty">（暂无已安装模块）</div>';
+        return;
+      }
+      box.innerHTML = mods.map(m =>
+        '<div class="card">' +
+          '<div class="mod-name">' + esc(m.name) + ' <span style="color:#999;font-weight:400;">(' + esc(m.id) + ')</span></div>' +
+          '<div class="mod-meta">版本 ' + esc(m.version) + ' · 作者 ' + esc(m.author) + '</div>' +
+          '<div class="mod-desc">' + esc(m.description) + '</div>' +
+          '<div style="margin-top:8px;">' +
+            '<button class="btn btn-run" onclick="runService(\'' + esc(m.id) + '\')">运行 service.sh</button>' +
+            '<button class="btn btn-danger" onclick="uninstall(\'' + esc(m.id) + '\')">卸载</button>' +
+          '</div>' +
+        '</div>'
+      ).join('');
+    }
+
+    async function refreshList() {
+      const box = document.getElementById('moduleList');
+      box.innerHTML = '<div class="empty">加载中...</div>';
+      try {
+        const resp = await fetch('/list', { method: 'POST', body: '' });
+        const data = await resp.json();
+        if (data.ok) renderList(data.modules);
+        else box.innerHTML = '<div class="empty">列表失败：' + esc(data.error || '未知') + '</div>';
+      } catch (e) {
+        box.innerHTML = '<div class="empty">请求失败：' + esc(e) + '</div>';
+      }
+    }
+
+    function setResult(text) { document.getElementById('result').textContent = text; }
+
+    async function uninstall(id) {
+      if (!confirm('确定卸载模块 "' + id + '"？将删除 /data/adb/modules/' + id)) return;
+      setResult('卸载中：' + id + ' ...');
+      try {
+        const resp = await fetch('/uninstall?id=' + encodeURIComponent(id), { method: 'POST', body: '' });
+        const data = await resp.json();
+        setResult(data.ok ? ('已卸载：' + id) : ('卸载失败：' + (data.error || '未知')));
+        refreshList();
+      } catch (e) { setResult('卸载请求失败：' + e); }
+    }
+
+    async function runService(id) {
+      setResult('运行 ' + id + ' 的 service.sh ...');
+      try {
+        const resp = await fetch('/runService?id=' + encodeURIComponent(id), { method: 'POST', body: '' });
+        const data = await resp.json();
+        setResult(data.ok ? ('service.sh 执行结果：\n\n' + data.report) : ('执行失败：\n' + (data.report || data.error || '未知')));
+      } catch (e) { setResult('请求失败：' + e); }
     }
 
     async function uploadModule() {
       const input = document.getElementById('file');
       if (!input.files.length) { alert('请先选择一个模块 ZIP'); return; }
       const file = input.files[0];
-
-      const box = document.getElementById('result');
-      box.textContent = "上传中：" + file.name + " (" + file.size + " 字节) ...";
+      setResult('上传中：' + file.name + ' (' + file.size + ' 字节) ...');
       try {
-        const resp = await fetch('/upload?name=' + encodeURIComponent(file.name),
-                                 { method: 'POST', body: file });
+        const resp = await fetch('/upload?name=' + encodeURIComponent(file.name), { method: 'POST', body: file });
         const text = await resp.text();
-        let data;
-        try { data = JSON.parse(text); }
-        catch (je) {
-          box.textContent = "上传失败：响应不是 JSON。HTTP=" + resp.status +
-            "\n原始响应：\n" + text;
-          return;
+        let data; try { data = JSON.parse(text); } catch (je) {
+          setResult('上传失败：响应不是 JSON。HTTP=' + resp.status + '\n原始响应：\n' + text); return;
         }
-        if (data.ok) {
-          box.textContent = "已上传 → " + data.name + "\n落盘路径：" + data.path + "\n大小：" + data.size + " 字节";
-        } else {
-          box.textContent = "上传失败：" + (data.error || "未知错误");
-        }
-      } catch (e) {
-        box.textContent = "上传失败：" + e;
-      }
+        if (data.ok) setResult('已上传 → ' + data.name + '\n落盘路径：' + data.path + '\n大小：' + data.size + ' 字节');
+        else setResult('上传失败：' + (data.error || '未知错误'));
+      } catch (e) { setResult('上传失败：' + e); }
     }
 
     async function installModule() {
-      const box = document.getElementById('result');
-      box.textContent = "安装中，请稍候...";
+      setResult('安装中，请稍候...');
       try {
         const resp = await fetch('/install', { method: 'POST', body: '' });
         const text = await resp.text();
-        let data;
-        try { data = JSON.parse(text); }
-        catch (je) {
-          box.textContent = "安装失败：响应不是 JSON。HTTP=" + resp.status +
-            "\n原始响应：\n" + text;
-          return;
+        let data; try { data = JSON.parse(text); } catch (je) {
+          setResult('安装失败：响应不是 JSON。HTTP=' + resp.status + '\n原始响应：\n' + text); return;
         }
-        if (data.ok) {
-          box.textContent = "安装完成：\n\n" + data.report;
-        } else {
-          box.textContent = "安装失败：\n" + data.report;
-        }
-      } catch (e) {
-        box.textContent = "安装请求失败：" + e;
-      }
+        if (data.ok) { setResult('安装完成：\n\n' + data.report); refreshList(); }
+        else setResult('安装失败：\n' + data.report);
+      } catch (e) { setResult('安装请求失败：' + e); }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
       getStatus();
+      refreshList();
+      document.getElementById('refreshBtn').addEventListener('click', refreshList);
       document.getElementById('uploadBtn').addEventListener('click', uploadModule);
       document.getElementById('installBtn').addEventListener('click', installModule);
     });
   </script>
-</head>
-<body>
-  <h1>SKZygiskCompat</h1>
-  <p>Magisk 兼容层：上传一个 Magisk 模块 zip → 装进容器 → 运行其脚本</p>
-
-  <div id="status" style="font-size:1.1em; margin-bottom:1em;">加载中...</div>
-
-  <h2>1. 选择模块</h2>
-  <input type="file" id="file" accept=".zip" />
-  <button id="uploadBtn">上传</button>
-
-  <h2>2. 安装并运行</h2>
-  <button id="installBtn">安装到 /data/adb/modules 并运行</button>
-
-  <h3>结果</h3>
-  <pre id="result" style="white-space:pre-wrap; word-break:break-all; background:#111; color:#0f0; padding:1em; min-height:300px;">（待操作）</pre>
 </body>
 </html>

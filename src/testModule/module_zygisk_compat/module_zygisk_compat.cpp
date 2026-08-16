@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstring>
 #include <cstdio>
+#include <cctype>
 #include <string>
 #include <ctime>
 #include <cerrno>
@@ -354,6 +355,144 @@ public:
             std::string resp = "{\"ok\":" + std::string(ok ? "true" : "false") +
                                ",\"report\":\"" + esc + "\"}";
             kernel_module::webui::send_json(conn, 200, resp);
+            return true;
+        }
+
+        // ---- 列表：扫描 /data/adb/modules/ 下已装模块 ----
+        if (path == "/list") {
+            std::string out;
+            // 一条 shell 扫描：输出 id|name|version|author|description（分隔符 |，字段用 tr 去 \r）
+            KModErr e = rsh(
+                "for d in /data/adb/modules/*/; do [ -d \"$d\" ] || continue; "
+                "id=$(basename \"$d\"); f=\"$d/module.prop\"; [ -f \"$f\" ] || continue; "
+                "name=$(sed -n 's/^name=//p' \"$f\" | tr -d '\\r'); "
+                "ver=$(sed -n 's/^version=//p' \"$f\" | tr -d '\\r'); "
+                "auth=$(sed -n 's/^author=//p' \"$f\" | tr -d '\\r'); "
+                "desc=$(sed -n 's/^description=//p' \"$f\" | tr -d '\\r'); "
+                "echo \"$id|$name|$ver|$auth|$desc\"; done 2>&1", out);
+            std::string resp;
+            if (is_failed(e)) {
+                resp = "{\"ok\":false,\"error\":\"" + to_string(e) + "\"}";
+            } else {
+                // 解析每行 id|name|version|author|description，拼 JSON 数组
+                std::string arr = "[";
+                size_t p = 0;
+                bool first = true;
+                while (p < out.size()) {
+                    size_t nl = out.find('\n', p);
+                    std::string line = (nl == std::string::npos) ? out.substr(p) : out.substr(p, nl - p);
+                    if (!line.empty() && line.back() == '\r') line.pop_back();
+                    p = (nl == std::string::npos) ? out.size() : nl + 1;
+                    if (line.empty()) continue;
+                    // 拆 5 段（id|name|version|author|description），description 可能含 |，只拆前 4 个
+                    std::string f[5];
+                    size_t pos = 0;
+                    for (int i = 0; i < 4; i++) {
+                        size_t bar = line.find('|', pos);
+                        if (bar == std::string::npos) { f[i] = (i == 0) ? line.substr(pos) : ""; pos = line.size(); }
+                        else { f[i] = line.substr(pos, bar - pos); pos = bar + 1; }
+                    }
+                    f[4] = line.substr(pos); // 剩余全部作为 description
+                    // JSON 转义各字段
+                    auto jesc = [](const std::string& s) {
+                        std::string r;
+                        for (char c : s) {
+                            if (c == '\\') r += "\\\\";
+                            else if (c == '"') r += "\\\"";
+                            else if (c == '\n') r += "\\n";
+                            else if (c == '\r') r += "\\r";
+                            else if (c == '\t') r += "\\t";
+                            else r += c;
+                        }
+                        return r;
+                    };
+                    if (!first) arr += ",";
+                    first = false;
+                    arr += "{\"id\":\"" + jesc(f[0]) + "\",\"name\":\"" + jesc(f[1]) +
+                           "\",\"version\":\"" + jesc(f[2]) + "\",\"author\":\"" + jesc(f[3]) +
+                           "\",\"description\":\"" + jesc(f[4]) + "\"}";
+                }
+                arr += "]";
+                resp = "{\"ok\":true,\"modules\":" + arr + "}";
+            }
+            kernel_module::webui::send_json(conn, 200, resp);
+            return true;
+        }
+
+        // ---- 运行 service.sh：执行 /data/adb/modules/<id>/service.sh ----
+        if (path == "/runService") {
+            std::string q = kernel_module::webui::get_request_query_string(conn);
+            std::string id;
+            const std::string key = "id=";
+            size_t pos = q.find(key);
+            if (pos != std::string::npos) {
+                id = q.substr(pos + key.size());
+                size_t amp = id.find('&');
+                if (amp != std::string::npos) id = id.substr(0, amp);
+            }
+            if (id.empty()) {
+                kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"缺少 id 参数\"}");
+                return true;
+            }
+            bool safe = !id.empty();
+            for (char c : id) {
+                if (!(isalnum((unsigned char)c) || c == '_' || c == '-')) { safe = false; break; }
+            }
+            if (!safe) {
+                kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"非法 id\"}");
+                return true;
+            }
+            std::string modroot = "/data/adb/modules/" + id;
+            std::string out;
+            KModErr e = rsh("test -f " + sq(modroot) + "/service.sh 2>/dev/null && sh " +
+                            sq(modroot + "/service.sh") + " 2>&1; echo \"SVC_EXIT=$?\"", out);
+            bool ok = is_ok(e);
+            std::string esc;
+            for (char c : out) {
+                if (c == '\\') esc += "\\\\";
+                else if (c == '"') esc += "\\\"";
+                else if (c == '\n') esc += "\\n";
+                else esc += c;
+            }
+            std::string resp = "{\"ok\":" + std::string(ok ? "true" : "false") +
+                               ",\"report\":\"" + esc + "\"}";
+            kernel_module::webui::send_json(conn, 200, resp);
+            return true;
+        }
+
+        // ---- 卸载：删除 /data/adb/modules/<id>（id 从 query 取）----
+        if (path == "/uninstall") {
+            std::string q = kernel_module::webui::get_request_query_string(conn);
+            std::string id;
+            const std::string key = "id=";
+            size_t pos = q.find(key);
+            if (pos != std::string::npos) {
+                id = q.substr(pos + key.size());
+                size_t amp = id.find('&');
+                if (amp != std::string::npos) id = id.substr(0, amp);
+            }
+            if (id.empty()) {
+                kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"缺少 id 参数\"}");
+                return true;
+            }
+            // 安全校验：id 仅允许字母数字下划线连字符，防路径穿越
+            bool safe = !id.empty();
+            for (char c : id) {
+                if (!(isalnum((unsigned char)c) || c == '_' || c == '-')) { safe = false; break; }
+            }
+            if (!safe) {
+                kernel_module::webui::send_json(conn, 400, "{\"ok\":false,\"error\":\"非法 id\"}");
+                return true;
+            }
+            std::string modroot = "/data/adb/modules/" + id;
+            std::string out;
+            KModErr e = rsh("rm -rf " + sq(modroot) + " 2>&1; test -d " + sq(modroot) +
+                            " && echo STILL_EXISTS || echo REMOVED", out);
+            bool ok = is_ok(e) && out.find("REMOVED") != std::string::npos;
+            std::string resp = ok
+                ? "{\"ok\":true,\"id\":\"" + id + "\"}"
+                : "{\"ok\":false,\"error\":\"卸载失败: " + out + "\"}";
+            kernel_module::webui::send_json(conn, ok ? 200 : 500, resp);
             return true;
         }
 
