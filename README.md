@@ -74,9 +74,9 @@ skroot-zygisk/
 
 ## 目前遇到的问题（核心问题）
 
-### zygote 注入走不通（三条硬墙叠加）
+### zygote 注入方向走不通（三条硬墙叠加）
 
-想要让 Zygisk 以原生 Magisk 的方式「一次性注入 zygote、所有 App 自动继承 hook」，在这台设备上是死路。三层原因叠加：
+想要让 Zygisk 以原生 Magisk 的方式「一次性注入 zygote、所有 App 自动继承 hook」，**在当前这个方向上走不通**。但这只代表「注入 zygote」这个方向不可行，并不代表进程注入这件事不能成功——换方向（注入单个 App）已经打通，见下文「工作原理」。三层原因叠加：
 
 1. **SELinux 域隔离**：SKRoot root 在 `u:r:shell:s0`，zygote 在 `u:r:zygote:s0`，sepolicy 无 `shell → zygote` 的 ptrace 规则。
 2. **时机不可逆转**：zygote 约 9s 启动并锁定，SKRoot 模块（supervisor）约 13s 才启动，永远落后约 4s。
@@ -134,7 +134,7 @@ ptrace ATTACH（attach 目标进程）
 
 实测：将 `/data/adb/modules/zygisksu/lib64/libzn_loader.so`（入口 `zn_entry`）注入天气 App（`com.coloros.weather2`，pid 3137），`inject` 返回 exit=0，`/proc/3137/maps` 出现三段完整映射（r-xp 代码段 / r--p 只读段 / rw-p 读写段），证明装载成功。
 
-**为什么 zygote 注入不可行**：
+**为什么 zygote 这个方向不可行**：
 - zygote 是 init 直接 fork、`u:r:zygote:s0` 域，shell 域无 ptrace 权限；
 - `process_vm_writev` 同样需要 ptrace 权限，shell 域→zygote 域被 SELinux 拒绝；
 - 即便 `runcon` 切到 zygote 域，`process_vm_writev` 依然被 zygote 的 `PR_SET_DUMPABLE=0`（不可被 attach）挡住。
@@ -158,12 +158,12 @@ ptrace ATTACH（attach 目标进程）
 - **ksu.exec 兼容桥**：后端 `/ksuExec` + 前端 `ksu-bridge.js`，对齐 KernelSU 三参回调契约。
 - **Magisk 身份伪装**：`MAGISK_VER_CODE=28101`，LSPosed 可正常安装。
 
-**当前结论**：让 Zygisk/LSPosed 的 hook 生效，正路是「注入具体 App 进程 + 常驻 watcher 自动触发」，而非注入 zygote。详见 `docs/device-probe.md` 与 `docs/roadmap.md`。
+**当前结论**：让 Zygisk/LSPosed 的 hook 生效，当前可走的路是「注入具体 App 进程 + 常驻 watcher 自动触发」，而非注入 zygote。详见 `docs/device-probe.md` 与 `docs/roadmap.md`。
 
 ---
 
 ## 目标
 
 1. 摸清 SKRoot Pro 的模块加载机制与 SDK 接口（基于实机，非假设）。
-2. 在 SKRoot Pro 上实现进程注入能力（单 App 注入已通，zygote 注入不可行）。
+2. 在 SKRoot Pro 上实现进程注入能力（单 App 注入已通，zygote 方向不可行）。
 3. 使 LSPosed / Xposed 模块可以在 SKRoot Pro 上运行（安装/打开已通，hook 生效走单 App 注入路线）。
